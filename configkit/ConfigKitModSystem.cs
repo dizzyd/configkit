@@ -428,7 +428,15 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     private void ReloadJsonConfigs(string eventName, ref EnumHandling handling, IAttribute data)
     {
         string domain = (data as ITreeAttribute)?.GetAsString("domain") ?? "";
-        _configs[domain].ReadFromFile();
+
+        // Anything can push an event onto the bus; an unknown domain must not throw out of it.
+        if (!_configs.TryGetValue(domain, out Config? config))
+        {
+            LoggerUtil.Warn(_api, this, $"Reload requested for unknown config domain '{domain}'.");
+            return;
+        }
+
+        config.ReadFromFile();
     }
     private void OnServerSettingChanged(IServerPlayer player, ServerSideSettingChanged packet)
     {

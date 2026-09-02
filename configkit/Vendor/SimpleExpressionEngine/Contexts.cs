@@ -99,79 +99,9 @@ public sealed class MathContext : IContext<float, float>
     }
 }
 
-public sealed class ReflectionContext<TResult, TArguments> : IContext<TResult, TArguments>
-{
-    private readonly object mSource;
-
-    public ReflectionContext(object source)
-    {
-        mSource = source;
-    }
-
-    public TResult Resolve(string name, params TArguments[] arguments)
-    {
-        if (arguments.Length != 0)
-        {
-            (bool resolved, TResult? value) = CallFunction(name, arguments);
-            if (!resolved || value == null) throw new InvalidDataException($"Unknown function: '{name}'");
-            return value;
-        }
-
-        (bool propertyResolved, TResult? propertyValue) = ResolveProperty(name);
-        if (propertyResolved && propertyValue != null) return propertyValue;
-
-        (bool fieldResolved, TResult? fieldValue) = ResolveField(name);
-        if (fieldResolved && fieldValue != null) return fieldValue;
-
-        (bool functionResolved, TResult? functionValue) = CallFunction(name, arguments);
-        if (functionResolved && functionValue != null) return functionValue;
-
-        throw new InvalidDataException($"Unknown function, property or field: '{name}'");
-    }
-
-    public bool Resolvable(string name)
-    {
-        if (mSource.GetType().GetProperty(name, BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public) != null) return true;
-        if (mSource.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public) != null) return true;
-        if (mSource.GetType().GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public) != null) return true;
-        
-        return false;
-    }
-
-    private (bool resolved, TResult? value) ResolveProperty(string name)
-    {
-        PropertyInfo? property = mSource.GetType().GetProperty(name, BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-        object? value = property?.GetValue(mSource);
-        return (value != null, value == null ? default : (TResult?)value);
-    }
-
-    private (bool resolved, TResult? value) ResolveField(string name)
-    {
-        FieldInfo? field = mSource.GetType().GetField(name, BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-        object? value = field?.GetValue(mSource);
-        return (value != null, value == null ? default : (TResult?)value);
-    }
-
-    public (bool resolved, TResult? value) CallFunction(string name, params TArguments[] arguments)
-    {
-        MethodInfo? methodInfo = mSource.GetType().GetMethod(name, BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-        if (methodInfo == null) return (false, default);
-        return (true, (TResult?)methodInfo.Invoke(mSource, arguments.Select(value => (object?)value).ToArray()));
-    }
-}
-
-public sealed class StatsContext<TArguments> : IContext<float, TArguments>
-{
-    private readonly IPlayer mPlayer;
-
-    public StatsContext(IPlayer player)
-    {
-        mPlayer = player;
-    }
-
-    public bool Resolvable(string name)
-    {
-        return mPlayer.Entity.Stats.Select(entry => entry.Key).Contains(name);
-    }
-    public float Resolve(string name, params TArguments[] arguments) => mPlayer.Entity.Stats.GetBlended(name);
-}
+// ReflectionContext<TResult,TArguments> and StatsContext<TArguments> were removed from this
+// vendored copy. Neither was reachable - ConfigKit wires up only MathContext,
+// BooleanMathContext, NumberSettingsContext, ValueContext and CombinedContext - and
+// ReflectionContext resolved and invoked members by string name with BindingFlags.NonPublic
+// on an arbitrary object. That is a useful primitive to no one but an attacker, and it sat
+// in the one namespace the build's containment check has to allow through.

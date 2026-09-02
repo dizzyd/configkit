@@ -166,9 +166,10 @@ public sealed class VerifyDependenciesTask : FrostingTask<BuildContext>
             foreach (TypeDefinitionHandle handle in metadata.TypeDefinitions)
             {
                 TypeDefinition type = metadata.GetTypeDefinition(handle);
-                string ns = metadata.GetString(type.Namespace);
+                string ns = NamespaceOf(metadata, type);
 
-                // Nested and compiler-generated types carry no namespace of their own.
+                // Compiler-generated types at global scope (<Module>, <PrivateImplementationDetails>)
+                // genuinely have no namespace and nothing to check.
                 if (ns.Length == 0) continue;
 
                 bool ours = OwnNamespacePrefixes.Any(prefix => ns == prefix || ns.StartsWith(prefix + "."));
@@ -188,6 +189,28 @@ public sealed class VerifyDependenciesTask : FrostingTask<BuildContext>
         }
 
         context.Log.Information("ConfigKit.dll declares only ConfigKit/SimpleExpressionEngine types.");
+    }
+
+    /// <summary>
+    /// A nested type carries no namespace of its own - it inherits its declaring type's. Reading
+    /// TypeDefinition.Namespace directly and skipping the empties meant every nested type was
+    /// exempt from the containment check, so hiding a payload inside any outer class would have
+    /// passed. Walk out to the declaring type instead.
+    /// </summary>
+    private static string NamespaceOf(MetadataReader metadata, TypeDefinition type)
+    {
+        for (int depth = 0; depth < 16; depth++)
+        {
+            string ns = metadata.GetString(type.Namespace);
+            if (ns.Length > 0) return ns;
+
+            TypeDefinitionHandle declaring = type.GetDeclaringType();
+            if (declaring.IsNil) return "";
+
+            type = metadata.GetTypeDefinition(declaring);
+        }
+
+        return "";
     }
 
     private static void VerifyThirdPartyAssemblies(BuildContext context, string publishDir)

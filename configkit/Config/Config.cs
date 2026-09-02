@@ -38,7 +38,7 @@ public sealed class Config : IConfig, IDisposable
         _json = json;
 
         RelativeFilePath = $"{_domain}.yaml";
-        ConfigFilePath = Path.Combine(_api.DataBasePath, "ModConfig", RelativeFilePath);
+        ConfigFilePath = ConfigPathFor(_api, RelativeFilePath);
 
         try
         {
@@ -66,7 +66,7 @@ public sealed class Config : IConfig, IDisposable
         _json = json;
 
         RelativeFilePath = $"{_domain}.yaml";
-        ConfigFilePath = Path.Combine(_api.DataBasePath, "ModConfig", RelativeFilePath);
+        ConfigFilePath = ConfigPathFor(_api, RelativeFilePath);
 
         try
         {
@@ -93,7 +93,7 @@ public sealed class Config : IConfig, IDisposable
         _modName = modName;
         _json = json;
         RelativeFilePath = file;
-        ConfigFilePath = Path.Combine(_api.DataBasePath, "ModConfig", file);
+        ConfigFilePath = ConfigPathFor(_api, file);
         JsonFilePath = ConfigFilePath;
         _configType = ConfigType.JSON;
 
@@ -121,7 +121,7 @@ public sealed class Config : IConfig, IDisposable
         _modName = modName;
         _json = json;
         RelativeFilePath = file;
-        ConfigFilePath = Path.Combine(_api.DataBasePath, "ModConfig", file);
+        ConfigFilePath = ConfigPathFor(_api, file);
         JsonFilePath = ConfigFilePath;
         _configType = ConfigType.JSON;
         JsonFilePath = file;
@@ -150,7 +150,7 @@ public sealed class Config : IConfig, IDisposable
         _modName = modName;
         _json = DefinitionFromObject(configObject, domain);
         RelativeFilePath = file;
-        ConfigFilePath = Path.Combine(_api.DataBasePath, "ModConfig", file);
+        ConfigFilePath = ConfigPathFor(_api, file);
         JsonFilePath = ConfigFilePath;
         _configType = ConfigType.JSON;
 
@@ -824,6 +824,44 @@ public sealed class Config : IConfig, IDisposable
         }
 
         _configFileWatcher = null;
+    }
+
+    /// <summary>
+    /// Resolves a config file name under ModConfig, and refuses anything that escapes it.
+    ///
+    /// On a client, the domain and file name arrive from the SERVER over the config registry
+    /// (see ConfigRegistry.FromBytes). Path.Combine happily honours "..", an absolute path or
+    /// a rooted drive, so without this a hostile server could name a file whose contents it
+    /// also largely controls and have the client create it anywhere the game process can
+    /// write. Falling back to the domain name keeps a bad name from taking the config down.
+    /// </summary>
+    private static string ConfigPathFor(ICoreAPI api, string? fileName)
+    {
+        string root = Path.GetFullPath(Path.Combine(api.DataBasePath, "ModConfig"));
+
+        string candidate = string.IsNullOrWhiteSpace(fileName) ? "config.yaml" : fileName!;
+        string resolved;
+
+        try
+        {
+            resolved = Path.GetFullPath(Path.Combine(root, candidate));
+        }
+        catch (Exception)
+        {
+            resolved = "";
+        }
+
+        // Compare against root plus a separator so "ModConfigEvil" cannot pass as "ModConfig".
+        string prefix = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+
+        if (resolved.StartsWith(prefix, StringComparison.Ordinal)) return resolved;
+
+        LoggerUtil.Warn(api, typeof(Config),
+            $"Refusing config file name '{candidate}': it resolves outside ModConfig. Using a safe name instead.");
+
+        return Path.Combine(root, Path.GetFileName(candidate) is { Length: > 0 } safe ? safe : "config.yaml");
     }
 
     private void CreateFileWatcher()

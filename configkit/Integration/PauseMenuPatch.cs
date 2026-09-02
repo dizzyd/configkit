@@ -19,8 +19,14 @@ internal static class PauseMenuPatch
     // ours, and every patch we own is attributed to it in any diagnostic that lists them.
     private const string HarmonyId = "com.dizzyd.configkit";
 
+    /// Tracked so Dispose cannot unpatch something we never patched - which matters when
+    /// ConfigKit has stood down in favour of another config mod and never patched at all.
+    private static bool _patched;
+
     public static void Patch()
     {
+        if (_patched) return;
+
         new Harmony(HarmonyId).Patch(
             typeof(GuiComposerHelpers).GetMethod("AddButton", AccessTools.all, new Type[] {
                 typeof(GuiComposer),
@@ -32,9 +38,13 @@ internal static class PauseMenuPatch
             }),
                 prefix: new HarmonyMethod(AccessTools.Method(typeof(PauseMenuPatch), nameof(AddButton)))
             );
+
+        _patched = true;
     }
     public static void Unpatch()
     {
+        if (!_patched) return;
+
         new Harmony(HarmonyId).Unpatch(
             typeof(GuiComposerHelpers).GetMethod("AddButton", AccessTools.all, new Type[] {
                 typeof(GuiComposer),
@@ -44,8 +54,14 @@ internal static class PauseMenuPatch
                 typeof(EnumButtonStyle),
                 typeof(string)
             }),
-                HarmonyPatchType.Prefix
+                HarmonyPatchType.Prefix,
+                // Harmony's third parameter defaults to "*", which removes EVERY owner's
+                // prefix on this method - including other config mods' pause-menu buttons.
+                // Constructing the Harmony instance with our id does not scope the call.
+                HarmonyId
             );
+
+        _patched = false;
     }
 
     private static bool AddButton(ref GuiComposer __result, GuiComposer composer, string text, ActionConsumable onClick, ElementBounds bounds)
