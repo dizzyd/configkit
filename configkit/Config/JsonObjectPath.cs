@@ -32,14 +32,17 @@ internal sealed class JsonObjectPath
     }
     public int Set(JsonObject tree, JsonObject value)
     {
-        IEnumerable<JsonObject> result = Get(tree);
+        // Materialise before mutating. Get returns a lazy chain, so replacing tokens while
+        // enumerating it - and then counting it again afterwards - re-ran the selectors
+        // against nodes that had already been swapped out.
+        List<JsonObject> targets = Get(tree).ToList();
 
-        foreach (JsonObject element in result)
+        foreach (JsonObject element in targets)
         {
             element.Token?.Replace(value.Token);
         }
 
-        return result.Count();
+        return targets.Count;
     }
 
     private delegate IEnumerable<JsonObject> PathElementDelegate(IEnumerable<JsonObject> attribute);

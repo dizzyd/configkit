@@ -43,9 +43,15 @@ public class ConfigSetting : ISetting
         set
         {
             _mappingKey = value;
-            if (_mappingKey != null && Validation != null && Validation.Mapping != null)
+
+            // The key can come from a server running a different version of the mod, where
+            // an enum member has been renamed or removed. Indexing blind threw
+            // KeyNotFoundException out of a packet handler, which on a client meant the
+            // join itself failed.
+            if (_mappingKey != null && Validation?.Mapping != null
+                && Validation.Mapping.TryGetValue(_mappingKey, out JsonObject? mapped))
             {
-                Value = Validation.Mapping[_mappingKey];
+                Value = mapped;
             }
         }
     }

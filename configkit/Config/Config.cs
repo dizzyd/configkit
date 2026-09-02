@@ -1092,34 +1092,34 @@ public sealed class Config : IConfig, IDisposable
             settings.Add(code, setting);
         }
     }
+    /// <summary>
+    /// The next weight not already taken, nudging upwards by the smallest representable
+    /// step. Two blocks may legitimately declare the same weight, and the previous
+    /// workaround added a fixed 1E-10f - which for any weight of 1 or more is lost entirely
+    /// in float32, so Add threw and the catch upstream left the mod with an empty config.
+    /// </summary>
+    private static float NextFreeWeight(SortedDictionary<float, IConfigBlock> taken, float weight)
+    {
+        while (taken.ContainsKey(weight))
+        {
+            float next = MathF.BitIncrement(weight);
+            weight = next > weight ? next : weight + 1f;
+        }
+
+        return weight;
+    }
+
     private SortedDictionary<float, IConfigBlock> CombineConfigBlocks(SortedDictionary<float, IConfigBlock> formatting, IEnumerable<ConfigSetting> settings)
     {
-        float delta = 1E-10f;
-        float increment = delta;
-
         SortedDictionary<float, IConfigBlock> configBlocks = new();
         foreach ((float sortingWeight, IConfigBlock block) in formatting)
         {
-            float weight = sortingWeight;
-            if (configBlocks.ContainsKey(weight))
-            {
-                weight += increment;
-                increment += delta;
-            }
-
-            configBlocks.Add(weight, block);
+            configBlocks.Add(NextFreeWeight(configBlocks, sortingWeight), block);
         }
 
         foreach (ConfigSetting setting in settings)
         {
-            float weight = setting.SortingWeight;
-            if (configBlocks.ContainsKey(weight))
-            {
-                weight += increment;
-                increment += delta;
-            }
-
-            configBlocks.Add(weight, setting);
+            configBlocks.Add(NextFreeWeight(configBlocks, setting.SortingWeight), setting);
         }
 
         return configBlocks;
@@ -1127,8 +1127,6 @@ public sealed class Config : IConfig, IDisposable
     private void FormattingFromJson(JsonObject json, out SortedDictionary<float, IConfigBlock> formatting, string domain)
     {
         formatting = new();
-        float delta = 1E-8f;
-        float increment = delta;
 
         if (!json.KeyExists("formatting") || !json["formatting"].IsArray()) return;
 
@@ -1136,13 +1134,7 @@ public sealed class Config : IConfig, IDisposable
         {
             IFormattingBlock formattingBlock = ParseBlock(block, domain);
 
-            float weight = formattingBlock.SortingWeight;
-            if (formatting.ContainsKey(weight))
-            {
-                weight += increment;
-                increment += delta;
-            }
-            formatting.Add(weight, formattingBlock);
+            formatting.Add(NextFreeWeight(formatting, formattingBlock.SortingWeight), formattingBlock);
         }
     }
     private IFormattingBlock ParseBlock(JsonObject block, string domain)
@@ -1228,18 +1220,17 @@ public sealed class Config : IConfig, IDisposable
     }
     private void SettingsToYaml(IEnumerable<ConfigSetting> settings, out SortedDictionary<float, string> yaml)
     {
-        float delta = 1E-10f;
-        float increment = delta;
-
         yaml = new();
         foreach (ConfigSetting setting in settings.Where(setting => !setting.Hide))
         {
             float weight = setting.SortingWeight < 0 ? 0 : setting.SortingWeight;
-            if (yaml.ContainsKey(weight))
+
+            while (yaml.ContainsKey(weight))
             {
-                weight += increment;
-                increment += delta;
+                float next = MathF.BitIncrement(weight);
+                weight = next > weight ? next : weight + 1f;
             }
+
             yaml.Add(weight, setting.ToYaml());
         }
     }

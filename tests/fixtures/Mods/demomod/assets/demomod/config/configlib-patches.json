@@ -72,6 +72,9 @@
       },
       "@demomod:config/tuned-*": {
         "value": "patchNumber"
+      },
+      "demomod:config/arrayed.json": {
+        "items/-/v": "patchNumber"
       }
     },
     "boolean": {

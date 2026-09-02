@@ -184,8 +184,32 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
             config.Apply();
         }
 
+        // A client whose server does not run ConfigKit never receives a config registry, so
+        // ReloadConfigs never fires and the window used to be built nowhere at all - the
+        // hotkey and the pause-menu button silently did nothing. Its own local configs are
+        // loaded and editable, so build the window here; a later sync rebuilds it.
+        if (api is ICoreClientAPI clientApi)
+        {
+            try
+            {
+                BuildSettingsWindow(clientApi);
+            }
+            catch (Exception exception)
+            {
+                LoggerUtil.Error(_api, this, $"Error creating the settings window: {exception}");
+            }
+        }
+
         ConfigsLoaded?.Invoke();
         ConfigsChanged?.Invoke(api);
+    }
+
+    private void BuildSettingsWindow(ICoreClientAPI clientApi)
+    {
+        _guiManager?.Dispose();
+        _guiManager = new ConfigGuiManager(clientApi, _configs);
+        _guiManager.ConfigWindowOpened += () => ConfigWindowOpened?.Invoke();
+        _guiManager.ConfigWindowClosed += () => ConfigWindowClosed?.Invoke();
     }
     public override double ExecuteOrder() => 0.01;
     public override void Dispose()
@@ -271,10 +295,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         {
             try
             {
-                _guiManager?.Dispose();
-                _guiManager = new ConfigGuiManager(clientApi, _configs);
-                _guiManager.ConfigWindowOpened += () => ConfigWindowOpened?.Invoke();
-                _guiManager.ConfigWindowClosed += () => ConfigWindowClosed?.Invoke();
+                BuildSettingsWindow(clientApi);
             }
             catch (Exception exception)
             {
