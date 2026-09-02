@@ -1,10 +1,7 @@
 // ConfigKit - zero-adoption mod configuration for Vintage Story
 // Copyright (C) 2026 Dave (Dizzy) Smith
 //
-// This program is free software: you can redistribute it and/or modify it under
-// the terms of the GNU Lesser General Public License as published by the Free
-// Software Foundation, either version 3 of the License, or (at your option) any
-// later version. See COPYING.LESSER, or <https://www.gnu.org/licenses/>.
+// Released under the MIT License. See LICENSE at the repository root.
 
 using System;
 using System.Collections.Generic;
@@ -251,6 +248,7 @@ public sealed class PackageTask : FrostingTask<BuildContext>
         }
 
         context.CopyDirectory($"../{BuildContext.ProjectName}/licenses", $"../Releases/{context.Name}/licenses");
+        context.CopyFile("../LICENSE", $"../Releases/{context.Name}/LICENSE");
 
         context.CopyFile($"../{BuildContext.ProjectName}/modinfo.json", $"../Releases/{context.Name}/modinfo.json");
         if (context.FileExists($"../{BuildContext.ProjectName}/modicon.png"))
