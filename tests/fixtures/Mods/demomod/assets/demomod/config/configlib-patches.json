@@ -1,21 +1,83 @@
 {
   "version": 1,
   "settings": [
-    { "type": "separator", "title": "Server settings",
-      "text": "These come from the server and a client cannot change them." },
-
-    { "type": "boolean", "code": "serverFlag", "nameInGui": "Server flag",
-      "default": true, "comment": "A server-authoritative switch." },
-
-    { "type": "integer", "code": "serverNumber", "nameInGui": "Server number",
-      "default": 7, "range": { "min": 1, "max": 10 } },
-
-    { "type": "string", "code": "serverLabel", "nameInGui": "Server label", "default": "from-server" },
-
-    { "type": "separator", "title": "Client settings",
-      "text": "These stay on this machine and are not synced." },
-
-    { "type": "boolean", "code": "clientFlag", "nameInGui": "Client flag",
-      "default": false, "clientSide": true, "comment": "Local to each player." }
-  ]
+    {
+      "type": "separator",
+      "title": "Server settings",
+      "text": "These come from the server and a client cannot change them."
+    },
+    {
+      "type": "boolean",
+      "code": "serverFlag",
+      "nameInGui": "Server flag",
+      "default": true,
+      "comment": "A server-authoritative switch."
+    },
+    {
+      "type": "integer",
+      "code": "serverNumber",
+      "nameInGui": "Server number",
+      "default": 7,
+      "range": {
+        "min": 1,
+        "max": 10
+      }
+    },
+    {
+      "type": "string",
+      "code": "serverLabel",
+      "nameInGui": "Server label",
+      "default": "from-server"
+    },
+    {
+      "type": "separator",
+      "title": "Client settings",
+      "text": "These stay on this machine and are not synced."
+    },
+    {
+      "type": "boolean",
+      "code": "clientFlag",
+      "nameInGui": "Client flag",
+      "default": false,
+      "clientSide": true,
+      "comment": "Local to each player."
+    },
+    {
+      "type": "separator",
+      "title": "Patching",
+      "text": "Drive the patch tests below."
+    },
+    {
+      "type": "integer",
+      "code": "patchNumber",
+      "nameInGui": "Patch number",
+      "default": 21,
+      "range": {
+        "min": 0,
+        "max": 100
+      }
+    },
+    {
+      "type": "boolean",
+      "code": "patchFlag",
+      "nameInGui": "Patch flag",
+      "default": true
+    }
+  ],
+  "patches": {
+    "number": {
+      "demomod:config/tunables.json": {
+        "damage": "value * 2",
+        "nested/radius": "patchNumber"
+      },
+      "@demomod:config/tuned-*": {
+        "value": "patchNumber"
+      }
+    },
+    "boolean": {
+      "demomod:config/tunables.json": {
+        "flag": "patchFlag"
+      }
+    }
+  }
 }

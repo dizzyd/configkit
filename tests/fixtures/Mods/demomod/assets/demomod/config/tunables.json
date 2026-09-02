@@ -1,0 +1,6 @@
+{
+  "damage": 10,
+  "nested": { "radius": 3 },
+  "flag": false,
+  "untouchedKey": "leave me alone"
+}
