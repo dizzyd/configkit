@@ -9,6 +9,9 @@ using Newtonsoft.Json.Linq;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
+using Vintagestory.API.Server;
+using Vintagestory.API.Datastructures;
+using Vintagestory.API.Server;
 
 namespace ConfigKit.Gui;
 
@@ -194,19 +197,33 @@ public class ConfigDialog : GuiDialog
                 continue;
             }
 
-            _settingsByKey[key] = setting;
+            if (!IsServerControlled(setting)) _settingsByKey[key] = setting;
 
             ElementBounds labelBounds = ElementBounds.Fixed(0, y + 4, LabelWidth, RowHeight);
             ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
 
-            composer.AddStaticText(LabelFor(setting), CairoFont.WhiteDetailText(), labelBounds);
+            bool locked = IsServerControlled(setting);
+
+            composer.AddStaticText(
+                locked ? LabelFor(setting) + " (server)" : LabelFor(setting),
+                locked ? CairoFont.WhiteDetailText().WithColor(GuiStyle.ColorParchment) : CairoFont.WhiteDetailText(),
+                labelBounds);
 
             if (!string.IsNullOrEmpty(setting.Comment))
             {
                 composer.AddHoverText(setting.Comment, CairoFont.WhiteDetailText(), 320, labelBounds.FlatCopy());
             }
 
-            AddControl(composer, setting, controlBounds, key);
+            if (locked)
+            {
+                // Editable here but never sent or saved, so the client would simply run on a
+                // value the server never agreed to. Show it, do not offer to change it.
+                composer.AddStaticText(ValueText(setting), CairoFont.WhiteDetailText(), controlBounds);
+            }
+            else
+            {
+                AddControl(composer, setting, controlBounds, key);
+            }
 
             y += RowHeight + RowGap;
         }
@@ -232,6 +249,21 @@ public class ConfigDialog : GuiDialog
 
         return y;
     }
+
+    /// <summary>
+    /// A server-side setting on a multiplayer client belongs to the server. Only a player
+    /// with controlserver may change one, and the change is pushed over the network.
+    /// </summary>
+    private bool IsServerControlled(ConfigSetting setting)
+    {
+        if (setting.ClientSide) return false;
+        if (capi.IsSinglePlayer) return false;
+
+        return capi.World?.Player?.HasPrivilege(Privilege.controlserver) != true;
+    }
+
+    private static string ValueText(ConfigSetting setting)
+        => setting.MappingKey ?? setting.Value.Token?.ToString() ?? "";
 
     private static string LabelFor(ConfigSetting setting)
     {
@@ -281,10 +313,13 @@ public class ConfigDialog : GuiDialog
 
         if (validation?.Values != null)
         {
-            string[] values = validation.Values.Select(value => value.AsString("")).ToArray();
-            int selected = Math.Max(0, Array.IndexOf(values, setting.Value.AsString("")));
+            // Render the raw token, not AsString: JsonObject.AsString returns the default
+            // for anything that is not literally a string, so a list of numbers came out as
+            // blank rows and wrote an empty string back into the setting.
+            string[] values = validation.Values.Select(TokenText).ToArray();
+            int selected = Math.Max(0, Array.IndexOf(values, TokenText(setting.Value)));
             composer.AddDropDown(values, values, selected,
-                (code, selectedNow) => { if (selectedNow) setting.Value = FromString(code); },
+                (code, selectedNow) => { if (selectedNow) SetFromText(setting, code); },
                 bounds, key);
             return;
         }
@@ -396,6 +431,22 @@ public class ConfigDialog : GuiDialog
         g = ((packed >> 8) & 0xFF) / 255.0;
         b = (packed & 0xFF) / 255.0;
         return true;
+    }
+
+    /// <summary>The value as written in the definition, whatever JSON type it is.</summary>
+    private static string TokenText(JsonObject value) => value.Token?.ToString() ?? "";
+
+    /// <summary>Parses a dropdown choice back into the setting's own type.</summary>
+    private static void SetFromText(ConfigSetting setting, string text)
+    {
+        setting.Value = setting.SettingType switch
+        {
+            ConfigSettingType.Integer when int.TryParse(text, out int i) => FromInt(i),
+            ConfigSettingType.Float when float.TryParse(text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float f) => FromFloat(f),
+            ConfigSettingType.Boolean when bool.TryParse(text, out bool b) => FromBool(b),
+            _ => FromString(text)
+        };
     }
 
     private static bool HasRange(Validation? validation)

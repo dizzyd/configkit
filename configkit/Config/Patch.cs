@@ -194,6 +194,17 @@ internal partial class AssetPatch
         JsonObject? asset = RetrieveAsset(path, out bool serverSide);
         return (serverSide, asset, path);
     }
+    /// <summary>
+    /// The bytes each asset had before ConfigKit first touched it.
+    ///
+    /// Patches rewrite IAsset.Data in place, and patching runs more than once on a client -
+    /// once over the locally parsed configs and again when the server's configs arrive. A
+    /// formula written against the asset's own value ("value * 2") therefore compounded, so
+    /// a x2 multiplier silently became x4. Every application starts from the pristine bytes
+    /// instead, which makes patching idempotent however often it runs.
+    /// </summary>
+    private static readonly Dictionary<string, byte[]> _pristineAssets = new();
+
     private JsonObject? RetrieveAsset(string path, out bool serverSide)
     {
         serverSide = false;
@@ -209,6 +220,7 @@ internal partial class AssetPatch
         try
         {
             asset = _api.Assets.Get(path);
+            RestorePristine(asset, path);
         }
         catch
         {
@@ -235,6 +247,29 @@ internal partial class AssetPatch
                 return null;
             }
         }
+    }
+
+    private static void RestorePristine(IAsset? asset, string path)
+    {
+        if (asset?.Data == null) return;
+
+        lock (_pristineAssets)
+        {
+            if (_pristineAssets.TryGetValue(path, out byte[]? original))
+            {
+                asset.Data = (byte[])original.Clone();
+            }
+            else
+            {
+                _pristineAssets[path] = (byte[])asset.Data.Clone();
+            }
+        }
+    }
+
+    /// <summary>Forgets the pristine copies. Assets are reloaded with the world.</summary>
+    internal static void ForgetPristineAssets()
+    {
+        lock (_pristineAssets) _pristineAssets.Clear();
     }
 
     private void StoreAsset(JsonObject data, string path)

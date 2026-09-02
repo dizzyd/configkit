@@ -65,6 +65,12 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
             onSettingChanged?.Invoke(setting.YamlCode);
         };
 
+        // The constructor has already read the file, and SettingChanged is only subscribed
+        // above - after the fact - so nothing has pushed those values onto the caller's
+        // object yet. Without this a mod runs on its compiled-in defaults while the file and
+        // the settings screen both show what the player edited.
+        config.AssignSettingsValues(configObject);
+
         config.ConfigSaved += config =>
         {
             onConfigSaved?.Invoke();
@@ -198,6 +204,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         _guiManager = null;
 
         _configs.Clear();
+        AssetPatch.ForgetPristineAssets();
         _domains.Clear();
         {
         }
@@ -239,6 +246,15 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
             }
 
             _domains.Add(domain);
+
+            // The config parsed from local assets is being replaced by the server's. Dispose
+            // it, or it stays registered in the static file-watcher tables holding a handler
+            // bound to this session, and the watcher is never released.
+            if (_configs.TryGetValue(domain, out Config? replaced) && !ReferenceEquals(replaced, config))
+            {
+                replaced.Dispose();
+            }
+
             _configs[domain] = config;
             config.Apply();
 

@@ -43,7 +43,7 @@ public sealed class Config : IConfig, IDisposable
         try
         {
             Parse(json, out _settings, out _configBlocks, out _defaultYaml, domain);
-            _clientSideSettings = _settings;
+            _clientSideSettings = new(_settings);   // a copy: aliasing lets Clear() empty _settings
             WriteToFile();
             _patches = new(api, this);
             CreateFileWatcher();
@@ -100,7 +100,7 @@ public sealed class Config : IConfig, IDisposable
         try
         {
             ParseJson(json, out _settings, out _configBlocks, out _defaultJson, domain);
-            _clientSideSettings = _settings;
+            _clientSideSettings = new(_settings);   // a copy: aliasing lets Clear() empty _settings
             _patches = new(api, this);
             CreateFileWatcher();
             SubscribeToSettingsChanges();
@@ -157,7 +157,7 @@ public sealed class Config : IConfig, IDisposable
         try
         {
             ParseJson(_json, out _settings, out _configBlocks, out _defaultJson, domain);
-            _clientSideSettings = _settings;
+            _clientSideSettings = new(_settings);   // a copy: aliasing lets Clear() empty _settings
             _patches = new(api, this);
             WriteToFile();
             CreateFileWatcher();
@@ -371,9 +371,13 @@ public sealed class Config : IConfig, IDisposable
         }
         else
         {
+            // Snapshot first. This rebuilds _clientSideSettings from _settings, and the two
+            // must not be the same object or the clear below empties what the loop reads -
+            // which silently left a synced config with no settings at all on a real server.
+            Dictionary<string, ConfigSetting> current = new(_settings);
             _clientSideSettings.Clear();
 
-            foreach ((string code, ConfigSetting setting) in _settings)
+            foreach ((string code, ConfigSetting setting) in current)
             {
                 bool serverSide = config.Settings.ContainsKey(code) && !config.Settings[code].ClientSide;
 
