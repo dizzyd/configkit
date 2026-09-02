@@ -31,6 +31,14 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     {
         if (_api == null) return;
 
+        // Accepting a registration while dormant would leave the caller believing its
+        // settings are managed when nothing will ever sync or display them.
+        if (_standingDown)
+        {
+            LoggerUtil.Notify(_api, this, $"Not registering '{domain}': ConfigKit has stood down in favour of another config mod.");
+            return;
+        }
+
         if (!_canRegisterNewConfig)
         {
             LoggerUtil.Error(_api, this, $"Cant register custom managed config '{domain}': too late, configs have been already sent to clients");
@@ -181,7 +189,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     {
         if (_api?.Side == EnumAppSide.Client)
         {
-            PauseMenuPatch.Patch();
+            PauseMenuPatch.Unpatch();
         }
 
         foreach ((_, Config config) in _configs)

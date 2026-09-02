@@ -18,9 +18,13 @@ namespace ConfigKit.Patches;
 
 internal static class PauseMenuPatch
 {
+    // Not "configlib". Patching under another mod's id means its UnpatchAll would rip out
+    // ours, and every patch we own is attributed to it in any diagnostic that lists them.
+    private const string HarmonyId = "com.dizzyd.configkit";
+
     public static void Patch()
     {
-        new Harmony("configlib").Patch(
+        new Harmony(HarmonyId).Patch(
             typeof(GuiComposerHelpers).GetMethod("AddButton", AccessTools.all, new Type[] {
                 typeof(GuiComposer),
                 typeof(string),
@@ -34,7 +38,7 @@ internal static class PauseMenuPatch
     }
     public static void Unpatch()
     {
-        new Harmony("configlib").Unpatch(
+        new Harmony(HarmonyId).Unpatch(
             typeof(GuiComposerHelpers).GetMethod("AddButton", AccessTools.all, new Type[] {
                 typeof(GuiComposer),
                 typeof(string),

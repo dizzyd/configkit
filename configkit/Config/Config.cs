@@ -791,6 +791,44 @@ public sealed class Config : IConfig, IDisposable
             _api.Logger.Error($"[ConfigKit] [config domain: {_domain}] Exception when trying to deserialize yaml and write it to file.\nException: {exception}\n");
         }
     }
+    /// <summary>
+    /// Detaches this config from the watcher it shares with every other config in the same
+    /// directory, and tears the watcher down only once nobody is left using it.
+    ///
+    /// Disposing the shared watcher outright - and clearing the whole path registry - meant
+    /// that whichever config happened to be disposed first killed file-change reloading for
+    /// every other config in the process, and left a disposed watcher cached in the static
+    /// dictionary for anything created afterwards. Leaving a world and rejoining was enough
+    /// to trigger it, and the only symptom was that editing a config file stopped doing
+    /// anything.
+    /// </summary>
+    private void ReleaseFileWatcher()
+    {
+        if (_configsByPath.TryGetValue(ConfigFilePath, out List<Config>? configs))
+        {
+            configs.Remove(this);
+            if (configs.Count == 0) _configsByPath.Remove(ConfigFilePath);
+        }
+
+        string? directory = Path.GetDirectoryName(ConfigFilePath);
+        if (directory == null)
+        {
+            _configFileWatcher = null;
+            return;
+        }
+
+        bool stillInUse = _configsByPath.Keys.Any(
+            path => string.Equals(Path.GetDirectoryName(path), directory, StringComparison.Ordinal));
+
+        if (!stillInUse && _fileWatchers.TryGetValue(directory, out FileSystemWatcher? watcher))
+        {
+            watcher?.Dispose();
+            _fileWatchers.Remove(directory);
+        }
+
+        _configFileWatcher = null;
+    }
+
     private void CreateFileWatcher()
     {
         string? directory = Path.GetDirectoryName(ConfigFilePath);
@@ -800,6 +838,8 @@ public sealed class Config : IConfig, IDisposable
             LoggerUtil.Warn(_api, this, $"[config domain: {_domain}] Unable to extract directory from: {ConfigFilePath}");
             return;
         }
+
+        RegisterForFileChanges();
 
         if (!_fileWatchers.TryGetValue(directory, out _configFileWatcher))
         {
@@ -826,14 +866,17 @@ public sealed class Config : IConfig, IDisposable
         int initialDelay = Math.Abs(Path.GetFileName(ConfigFilePath).GetHashCode()) % _fileChangeCheckIntervalMs;
 
         _fileChangedListener = _api.World.RegisterGameTickListener(_ => OnFileChanged(), _fileChangeCheckIntervalMs, initialDelay);
+    }
 
+    private void RegisterForFileChanges()
+    {
         if (_configsByPath.TryGetValue(ConfigFilePath, out List<Config>? configs))
         {
-            configs.Add(this);
+            if (!configs.Contains(this)) configs.Add(this);
         }
         else
         {
-            _configsByPath.TryAdd(ConfigFilePath, [this]);
+            _configsByPath[ConfigFilePath] = [this];
         }
     }
     private bool CheckIfFileChanged()
@@ -1270,9 +1313,8 @@ public sealed class Config : IConfig, IDisposable
         {
             if (disposing)
             {
-                _configFileWatcher?.Dispose();
-                _configFileWatcher = null;
-                _configsByPath.Clear();
+                ReleaseFileWatcher();
+
                 if (_fileChangedListener != 0)
                 {
                     _api.World.UnregisterGameTickListener(_fileChangedListener);
