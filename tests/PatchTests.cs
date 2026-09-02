@@ -98,6 +98,7 @@ public class PatchTests
     /// Server-side categories are refused on a client, because the server owns them and
     /// syncs the result. Patching them locally would desync the two.
     /// </summary>
+    [SingleplayerOnly]
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]
     public async Task TheServerSideOfPatchingIsWhereBlockAndItemChangesHappen()

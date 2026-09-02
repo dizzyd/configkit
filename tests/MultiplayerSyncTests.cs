@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using ConfigKit;
+using Vintagestory.API.Server;
+using ConfigKit.Gui;
 using VsTestkit.Testing;
 using static VsTestkit.Testing.Vs;
 
@@ -107,5 +109,45 @@ public class MultiplayerSyncTests
         await Frames.Wait(10);
         await Shot.Take("configkit-multiplayer");
         ConfigKit.Gui.ConfigGui.Show();
+    }
+
+    /// <summary>
+    /// Server-authoritative settings belong to the server. A player without controlserver
+    /// may look but not touch: the window shows them read-only, because a local edit would
+    /// never be sent or saved and the client would then run on a value the server never
+    /// agreed to.
+    /// </summary>
+    [VsTest(TimeoutMs = 120000)]
+    [RequiresClient]
+    [RequiresMultiplayer]
+    public async Task ServerSettingsAreReadOnlyWithoutPrivilege()
+    {
+        await OnClient();
+
+        string player = Capi.World.Player.PlayerName;
+        bool admin = Capi.World.Player.HasPrivilege(Privilege.controlserver);
+        Log($"player '{player}' has controlserver = {admin}");
+
+        Config config = (Config)Capi.ModLoader.GetModSystem<ConfigKitModSystem>().GetConfig(Domain)!;
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { [Domain] = config });
+        dialog.TryOpen();
+        await Frames.Wait(5);
+
+        int editable = dialog.RenderedSettings.Count;
+        int total = config.SettingCodes.Count();
+        Log($"{editable} of {total} settings are editable here");
+
+        if (admin)
+        {
+            // An admin may change everything, so nothing is locked.
+            Assert.Equal(total, editable);
+        }
+        else
+        {
+            // Only the clientSide one is editable; the three server settings are not.
+            Assert.Equal(1, editable);
+        }
+
+        dialog.TryClose();
     }
 }
