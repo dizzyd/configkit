@@ -1,0 +1,9 @@
+{
+    "type": "content",
+    "modid": "demomod",
+    "name": "ConfigKit Demo Mod",
+    "authors": [ "ConfigKit tests" ],
+    "description": "A fixture mod that exists only to give ConfigKit's tests a real config to load, sync and edit. Not shipped.",
+    "version": "1.0.0",
+    "dependencies": { "game": "1.22.0" }
+}

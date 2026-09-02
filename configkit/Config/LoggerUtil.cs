@@ -1,0 +1,94 @@
+// ConfigKit - mod configuration for Vintage Story
+// Copyright (C) 2026 Dave (Dizzy) Smith
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option) any
+// later version. See COPYING.LESSER, or <https://www.gnu.org/licenses/>.
+//
+// Derived from ConfigLib by Maltiez (https://github.com/maltiez2/vsmod_configlib),
+// released under CC0 1.0 Universal. Adapted to drop the Dear ImGui dependency.
+
+using System.Runtime.CompilerServices;
+using Vintagestory.API.Common;
+
+namespace ConfigKit;
+
+internal static class LoggerUtil
+{
+    private const string _prefix = "[ConfigKit]";
+
+    public static void Notify(ICoreAPI? api, object caller, string format) => api?.Logger?.Notification(Format(caller, format));
+    public static void Notify(ICoreAPI? api, Type type, string format) => api?.Logger?.Notification(Format(type, format));
+
+    public static void Warn(ICoreAPI? api, object caller, string format) => api?.Logger?.Warning(Format(caller, format));
+    public static void Warn(ICoreAPI? api, Type type, string format) => api?.Logger?.Warning(Format(type, format));
+
+    public static void Error(ICoreAPI? api, object caller, string format) => api?.Logger?.Error(Format(caller, format));
+    public static void Error(ICoreAPI? api, Type type, string format) => api?.Logger?.Error(Format(type, format));
+
+    public static void Debug(ICoreAPI? api, object caller, string format) => api?.Logger?.Debug(Format(caller, format));
+    public static void Debug(ICoreAPI? api, Type type, string format) => api?.Logger?.Debug(Format(type, format));
+
+    public static void Verbose(ICoreAPI? api, object caller, string format) => api?.Logger?.VerboseDebug(Format(caller, format));
+    public static void Verbose(ICoreAPI? api, Type type, string format) => api?.Logger?.VerboseDebug(Format(type, format));
+
+    public static void Dev(ICoreAPI? api, object caller, string format)
+    {
+#if DEBUG
+        api?.Logger?.Notification(Format(caller, format));
+#endif
+    }
+    public static void Dev(ICoreAPI? api, Type type, string format)
+    {
+#if DEBUG
+        api?.Logger?.Notification(Format(type, format));
+#endif
+    }
+
+    public static string Format(object caller, string format)
+    {
+        DefaultInterpolatedStringHandler defaultInterpolatedStringHandler = new(4, 3);
+        defaultInterpolatedStringHandler.AppendFormatted(_prefix);
+        defaultInterpolatedStringHandler.AppendLiteral(" [");
+        defaultInterpolatedStringHandler.AppendFormatted(GetCallerTypeName(caller));
+        defaultInterpolatedStringHandler.AppendLiteral("] ");
+        defaultInterpolatedStringHandler.AppendFormatted(format);
+        return defaultInterpolatedStringHandler.ToStringAndClear().Replace("{", "{{").Replace("}", "}}");
+    }
+    public static string Format(Type type, string format)
+    {
+        DefaultInterpolatedStringHandler defaultInterpolatedStringHandler = new(4, 3);
+        defaultInterpolatedStringHandler.AppendFormatted(_prefix);
+        defaultInterpolatedStringHandler.AppendLiteral(" [");
+        defaultInterpolatedStringHandler.AppendFormatted(GetTypeName(type));
+        defaultInterpolatedStringHandler.AppendLiteral("] ");
+        defaultInterpolatedStringHandler.AppendFormatted(format);
+        return defaultInterpolatedStringHandler.ToStringAndClear().Replace("{", "{{").Replace("}", "}}");
+    }
+
+    public static string GetCallerTypeName(object caller)
+    {
+        Type type = caller.GetType();
+        if (type.IsGenericType)
+        {
+            string obj = type.Name.Split(new char[1] { '`' }, StringSplitOptions.RemoveEmptyEntries)[0];
+            string text = type.GetGenericArguments().Select(new System.Func<Type, string>(GetTypeName)).Aggregate((string first, string second) => first + "," + second);
+            return obj + "<" + text + ">";
+        }
+
+        return type.Name;
+    }
+
+    private static string GetTypeName(Type type)
+    {
+        if (type.IsGenericType)
+        {
+            string obj = type.Name.Split(new char[1] { '`' }, StringSplitOptions.RemoveEmptyEntries)[0];
+            string text = type.GetGenericArguments().Select(new System.Func<Type, string>(GetTypeName)).Aggregate((string first, string second) => first + "," + second);
+            return obj + "<" + text + ">";
+        }
+
+        return type.Name;
+    }
+}

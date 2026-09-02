@@ -1,0 +1,9 @@
+bin/
+obj/
+Releases/
+.idea/
+*.DotSettings.user
+.DS_Store
+
+# Written by the csproj on first build; points at a local game install.
+configkit/Properties/localSettings.props

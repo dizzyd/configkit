@@ -1,0 +1,548 @@
+// ConfigKit - mod configuration for Vintage Story
+// Copyright (C) 2026 Dave (Dizzy) Smith
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU Lesser General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option) any
+// later version. See COPYING.LESSER, or <https://www.gnu.org/licenses/>.
+
+using ConfigKit.Formatting;
+using System.Text.RegularExpressions;
+using Newtonsoft.Json.Linq;
+using Vintagestory.API.Client;
+using Vintagestory.API.Common;
+using Vintagestory.API.Datastructures;
+
+namespace ConfigKit.Gui;
+
+/// <summary>
+/// The settings window, drawn with the game's own Cairo GUI.
+///
+/// One mod's settings are shown at a time, picked from a dropdown, because a pack can
+/// easily carry twenty configurable mods and tabs across the top run out of room long
+/// before that does.
+///
+/// Rows live inside a clipped region whose parent bounds we move to scroll:
+/// ElementBounds.CalcWorldBounds cascades to children, so shifting the one content
+/// bounds moves every row in it.
+/// </summary>
+public class ConfigDialog : GuiDialog
+{
+    private const double DialogWidth = 700;
+    private const double MaxContentHeight = 420;
+    private const double MinContentHeight = 90;
+    private const double RowHeight = 32;
+    private const double RowGap = 6;
+    private const double LabelWidth = 330;
+    private const double ControlWidth = 300;
+
+    private readonly Dictionary<string, Config> _configs;
+    private readonly List<string> _domains;
+    private string _domain;
+
+    /// Rows are rebuilt whenever the mod selection changes, so the widget keys have to be
+    /// unique per compose rather than per setting.
+    private readonly Dictionary<string, ConfigSetting> _settingsByKey = new();
+
+    private ElementBounds? _contentBounds;
+    private double _contentHeight;
+
+    public ConfigDialog(ICoreClientAPI capi, Dictionary<string, Config> configs) : base(capi)
+    {
+        _configs = configs;
+        _domains = configs.Keys.OrderBy(domain => DisplayName(domain), StringComparer.OrdinalIgnoreCase).ToList();
+        _domain = _domains.FirstOrDefault() ?? "";
+    }
+
+    public override string ToggleKeyCombinationCode => "configkitconfigs";
+
+    /// <summary>The configs this window is showing, keyed by mod domain.</summary>
+    public IReadOnlyDictionary<string, Config> Configs => _configs;
+
+    /// <summary>
+    /// The settings currently laid out, keyed by widget. Empty until the window has been
+    /// composed, and rebuilt whenever the selected mod changes.
+    /// </summary>
+    public IReadOnlyDictionary<string, ConfigSetting> RenderedSettings => _settingsByKey;
+
+    public override void OnGuiOpened()
+    {
+        base.OnGuiOpened();
+        Compose();
+    }
+
+    private string DisplayName(string domain)
+    {
+        Config config = _configs[domain];
+        return string.IsNullOrWhiteSpace(config.ModName) ? domain : config.ModName;
+    }
+
+    // ------------------------------------------------------------------ composition
+
+    private void Compose()
+    {
+        if (_domains.Count == 0)
+        {
+            ComposeEmpty();
+            return;
+        }
+
+        _settingsByKey.Clear();
+
+        // Lay the rows out once without a composer to learn how tall they are, so a mod
+        // with three settings gets a short panel instead of half a screen of empty wood.
+        _contentHeight = LayoutRows(null, _configs[_domain]);
+        double visibleHeight = Math.Clamp(_contentHeight, MinContentHeight, MaxContentHeight);
+        bool needsScrollbar = _contentHeight > visibleHeight + 0.5;
+
+        ElementBounds dropdownBounds = ElementBounds.Fixed(0, 28, 360, 28);
+        ElementBounds clipBounds = ElementBounds.Fixed(0, 70, DialogWidth, visibleHeight);
+        ElementBounds insetBounds = clipBounds.ForkBoundingParent(3, 3, 3, 3);
+        ElementBounds scrollbarBounds = ElementBounds.Fixed(DialogWidth + 10, 70, 20, visibleHeight);
+
+        // The bounds every row hangs off. Scrolling moves this one element.
+        _contentBounds = ElementBounds.Fixed(0, 0, DialogWidth - 20, 10);
+
+        double buttonY = visibleHeight + 86;
+        ElementBounds saveBounds = ElementBounds.Fixed(0, buttonY, 90, 26);
+        ElementBounds reloadBounds = ElementBounds.Fixed(100, buttonY, 90, 26);
+        ElementBounds defaultsBounds = ElementBounds.Fixed(200, buttonY, 150, 26);
+
+        ElementBounds bgBounds = ElementBounds.Fill.WithFixedPadding(GuiStyle.ElementToDialogPadding);
+        bgBounds.BothSizing = ElementSizing.FitToChildren;
+
+        GuiComposer composer = capi.Gui
+            .CreateCompo("configkit-settings", ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterMiddle))
+            .AddShadedDialogBG(bgBounds)
+            .AddDialogTitleBar("Mod settings", OnClose)
+            .BeginChildElements(bgBounds)
+                .AddDropDown(
+                    _domains.ToArray(),
+                    _domains.Select(DisplayName).ToArray(),
+                    Math.Max(0, _domains.IndexOf(_domain)),
+                    OnDomainSelected,
+                    dropdownBounds,
+                    "domain")
+                .AddInset(insetBounds, 3)
+                .BeginClip(clipBounds)
+                    .BeginChildElements(_contentBounds);
+
+        LayoutRows(composer, _configs[_domain]);
+        _contentBounds.fixedHeight = _contentHeight;
+
+        composer
+                    .EndChildElements()
+                .EndClip();
+
+        // A scrollbar over content that already fits tells the player there is more to see.
+        if (needsScrollbar) composer.AddVerticalScrollbar(OnScroll, scrollbarBounds, "scrollbar");
+
+        composer
+            .AddSmallButton("Save", OnSave, saveBounds, EnumButtonStyle.Normal)
+            .AddSmallButton("Reload", OnReload, reloadBounds, EnumButtonStyle.Normal)
+            .AddSmallButton("Restore defaults", OnDefaults, defaultsBounds, EnumButtonStyle.Normal)
+            .EndChildElements();
+
+        SingleComposer = composer.Compose();
+
+        if (needsScrollbar)
+        {
+            SingleComposer.GetScrollbar("scrollbar")
+                .SetHeights((float)visibleHeight, (float)_contentHeight);
+        }
+    }
+
+    private void ComposeEmpty()
+    {
+        ElementBounds textBounds = ElementBounds.Fixed(0, 30, 420, 60);
+        ElementBounds bgBounds = ElementBounds.Fill.WithFixedPadding(GuiStyle.ElementToDialogPadding);
+        bgBounds.BothSizing = ElementSizing.FitToChildren;
+
+        SingleComposer = capi.Gui
+            .CreateCompo("configkit-settings", ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterMiddle))
+            .AddShadedDialogBG(bgBounds)
+            .AddDialogTitleBar("Mod settings", OnClose)
+            .BeginChildElements(bgBounds)
+                .AddStaticText(
+                    "No mods here have settings ConfigKit can edit.",
+                    CairoFont.WhiteDetailText(), textBounds)
+            .EndChildElements()
+            .Compose();
+    }
+
+    /// <summary>
+    /// Walks the config's blocks in order, laying out one row per visible setting.
+    /// A null composer measures without emitting, so the panel can be sized to its content
+    /// before anything is added to it - one method, so the two passes cannot drift apart.
+    /// </summary>
+    private double LayoutRows(GuiComposer? composer, Config config)
+    {
+        double y = 4;
+        int index = 0;
+
+        foreach ((float _, IConfigBlock block) in config.ConfigBlocks)
+        {
+            if (block is IFormattingBlock formatting)
+            {
+                y = AddFormattingBlock(composer, formatting, y);
+                continue;
+            }
+
+            if (block is not ConfigSetting setting || setting.Hide) continue;
+
+            string key = $"setting-{index++}";
+            if (composer == null)
+            {
+                y += RowHeight + RowGap;
+                continue;
+            }
+
+            _settingsByKey[key] = setting;
+
+            ElementBounds labelBounds = ElementBounds.Fixed(0, y + 4, LabelWidth, RowHeight);
+            ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
+
+            composer.AddStaticText(LabelFor(setting), CairoFont.WhiteDetailText(), labelBounds);
+
+            if (!string.IsNullOrEmpty(setting.Comment))
+            {
+                composer.AddHoverText(setting.Comment, CairoFont.WhiteDetailText(), 320, labelBounds.FlatCopy());
+            }
+
+            AddControl(composer, setting, controlBounds, key);
+
+            y += RowHeight + RowGap;
+        }
+
+        return y;
+    }
+
+    private static double AddFormattingBlock(GuiComposer? composer, IFormattingBlock block, double y)
+    {
+        if (block.Title != null)
+        {
+            composer?.AddStaticText(block.Title, CairoFont.WhiteSmallText().WithWeight(Cairo.FontWeight.Bold),
+                ElementBounds.Fixed(0, y + 10, DialogWidth - 40, 26));
+            y += 40;
+        }
+
+        if (block.Text != null)
+        {
+            composer?.AddStaticText(block.Text, CairoFont.WhiteDetailText(),
+                ElementBounds.Fixed(0, y, DialogWidth - 40, 24));
+            y += 28;
+        }
+
+        return y;
+    }
+
+    private static string LabelFor(ConfigSetting setting)
+    {
+        string? label = setting.InGui;
+
+        // A managed (POCO) config labels each setting "<domain>:setting-<FieldName>", which
+        // Lang returns unchanged when the mod ships no translation for it. Showing a player
+        // "mymod:setting-MaxRadius" is worse than showing "Max radius".
+        if (string.IsNullOrWhiteSpace(label) || IsUntranslatedLangKey(label!))
+        {
+            return Humanize(setting.YamlCode);
+        }
+
+        return label!;
+    }
+
+    private static bool IsUntranslatedLangKey(string label)
+        => label.Contains(':') && !label.Contains(' ');
+
+    /// <summary>"MaxClientViewDistance" -> "Max client view distance".</summary>
+    private static string Humanize(string code)
+    {
+        string spaced = Regex.Replace(code.Replace('_', ' '), "(?<=[a-z0-9])(?=[A-Z])", " ");
+        spaced = spaced.Trim();
+        if (spaced.Length == 0) return code;
+
+        return char.ToUpperInvariant(spaced[0]) + spaced[1..].ToLowerInvariant();
+    }
+
+    // ------------------------------------------------------------------ controls
+
+    private void AddControl(GuiComposer composer, ConfigSetting setting, ElementBounds bounds, string key)
+    {
+        Validation? validation = setting.Validation;
+
+        // A fixed set of allowed values, or a named mapping, is a dropdown whatever the
+        // underlying type is.
+        if (validation?.Mapping != null)
+        {
+            string[] keys = validation.Mapping.Keys.ToArray();
+            int selected = Math.Max(0, Array.IndexOf(keys, setting.MappingKey ?? ""));
+            composer.AddDropDown(keys, keys, selected,
+                (code, selectedNow) => { if (selectedNow) setting.MappingKey = code; },
+                bounds, key);
+            return;
+        }
+
+        if (validation?.Values != null)
+        {
+            string[] values = validation.Values.Select(value => value.AsString("")).ToArray();
+            int selected = Math.Max(0, Array.IndexOf(values, setting.Value.AsString("")));
+            composer.AddDropDown(values, values, selected,
+                (code, selectedNow) => { if (selectedNow) setting.Value = FromString(code); },
+                bounds, key);
+            return;
+        }
+
+        switch (setting.SettingType)
+        {
+            case ConfigSettingType.Boolean:
+                composer.AddSwitch(on => setting.Value = FromBool(on), bounds, key);
+                break;
+
+            case ConfigSettingType.Integer when HasRange(validation):
+            case ConfigSettingType.Float when HasRange(validation):
+                composer.AddSlider(value => OnSlider(setting, value), bounds, key);
+                break;
+
+            case ConfigSettingType.Integer:
+            case ConfigSettingType.Float:
+                composer.AddNumberInput(bounds, text => OnNumberTyped(setting, text), CairoFont.WhiteDetailText(), key);
+                break;
+
+            case ConfigSettingType.Other:
+                composer.AddTextArea(bounds.WithFixedHeight(RowHeight * 2), text => OnJsonTyped(setting, text),
+                    CairoFont.WhiteDetailText(), key);
+                break;
+
+            case ConfigSettingType.Color:
+                AddColorControl(composer, setting, bounds, key);
+                break;
+
+            case ConfigSettingType.String:
+            default:
+                composer.AddTextInput(bounds, text => setting.Value = FromString(text), CairoFont.WhiteDetailText(), key);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Colours are "#rrggbb" strings. Vanilla offers a fixed-palette picker but no
+    /// free-form one, so this is a hex field with a live swatch beside it: exact values
+    /// stay typeable and pasteable, and a mistyped one is visible rather than silent.
+    /// </summary>
+    private void AddColorControl(GuiComposer composer, ConfigSetting setting, ElementBounds bounds, string key)
+    {
+        double swatchSize = bounds.fixedHeight;
+        ElementBounds fieldBounds = bounds.FlatCopy().WithFixedWidth(bounds.fixedWidth - swatchSize - 8);
+        ElementBounds swatchBounds = ElementBounds.Fixed(
+            bounds.fixedX + bounds.fixedWidth - swatchSize, bounds.fixedY, swatchSize, swatchSize);
+
+        composer.AddTextInput(fieldBounds, text => OnColorTyped(setting, text, key), CairoFont.WhiteDetailText(), key);
+        composer.AddDynamicCustomDraw(swatchBounds, (ctx, surface, currentBounds) =>
+            DrawSwatch(ctx, currentBounds, setting.Value.AsString("#000000")), SwatchKey(key));
+    }
+
+    private static string SwatchKey(string key) => key + "-swatch";
+
+    private void OnColorTyped(ConfigSetting setting, string text, string key)
+    {
+        setting.Value = FromString(text);
+
+        // Repaint the swatch on every keystroke; a half-typed colour simply does not parse
+        // and leaves the swatch showing its "no colour" state.
+        SingleComposer?.GetCustomDraw(SwatchKey(key))?.Redraw();
+    }
+
+    private static void DrawSwatch(Cairo.Context ctx, ElementBounds bounds, string hex)
+    {
+        double x = 0, y = 0, w = bounds.InnerWidth, h = bounds.InnerHeight;
+
+        if (TryParseHex(hex, out double r, out double g, out double b))
+        {
+            ctx.SetSourceRGB(r, g, b);
+            ctx.Rectangle(x, y, w, h);
+            ctx.Fill();
+        }
+        else
+        {
+            // Unparseable: a flat dark box with a stroke through it, so it reads as "not a
+            // colour" rather than as black.
+            ctx.SetSourceRGB(0.12, 0.12, 0.12);
+            ctx.Rectangle(x, y, w, h);
+            ctx.Fill();
+            ctx.SetSourceRGB(0.75, 0.3, 0.3);
+            ctx.LineWidth = 2;
+            ctx.MoveTo(x + 3, y + 3);
+            ctx.LineTo(x + w - 3, y + h - 3);
+            ctx.Stroke();
+        }
+
+        ctx.SetSourceRGB(0, 0, 0);
+        ctx.LineWidth = 1;
+        ctx.Rectangle(x + 0.5, y + 0.5, w - 1, h - 1);
+        ctx.Stroke();
+    }
+
+    /// <summary>Parses "#rrggbb" or "#aarrggbb", with or without the hash.</summary>
+    public static bool TryParseHex(string? hex, out double r, out double g, out double b)
+    {
+        r = g = b = 0;
+        if (hex == null) return false;
+
+        string digits = hex.Trim().TrimStart('#');
+        if (digits.Length == 8) digits = digits[2..];   // drop alpha
+        if (digits.Length != 6) return false;
+
+        if (!int.TryParse(digits, System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture, out int packed)) return false;
+
+        r = ((packed >> 16) & 0xFF) / 255.0;
+        g = ((packed >> 8) & 0xFF) / 255.0;
+        b = (packed & 0xFF) / 255.0;
+        return true;
+    }
+
+    private static bool HasRange(Validation? validation)
+        => validation?.Minimum != null && validation?.Maximum != null;
+
+    /// <summary>Pushes current values into the widgets once they exist.</summary>
+    private void LoadControlValues()
+    {
+        foreach ((string key, ConfigSetting setting) in _settingsByKey)
+        {
+            Validation? validation = setting.Validation;
+
+            if (validation?.Mapping != null || validation?.Values != null) continue;
+
+            switch (setting.SettingType)
+            {
+                case ConfigSettingType.Boolean:
+                    SingleComposer.GetSwitch(key).On = setting.Value.AsBool();
+                    break;
+
+                case ConfigSettingType.Integer when HasRange(validation):
+                case ConfigSettingType.Float when HasRange(validation):
+                    SingleComposer.GetSlider(key).SetValues(
+                        ToSliderInt(setting, setting.Value),
+                        ToSliderInt(setting, validation!.Minimum!),
+                        ToSliderInt(setting, validation.Maximum!),
+                        Math.Max(1, validation.Step == null ? 1 : ToSliderInt(setting, validation.Step)));
+                    break;
+
+                case ConfigSettingType.Other:
+                    SingleComposer.GetTextArea(key).SetValue(setting.Value.ToString());
+                    break;
+
+                case ConfigSettingType.Integer:
+                case ConfigSettingType.Float:
+                    SingleComposer.GetTextInput(key).SetValue(NumberText(setting));
+                    break;
+
+                case ConfigSettingType.Color:
+                    SingleComposer.GetTextInput(key).SetValue(setting.Value.AsString(""));
+                    SingleComposer.GetCustomDraw(SwatchKey(key))?.Redraw();
+                    break;
+
+                case ConfigSettingType.String:
+                default:
+                    SingleComposer.GetTextInput(key).SetValue(setting.Value.AsString(""));
+                    break;
+            }
+        }
+    }
+
+    private static string NumberText(ConfigSetting setting)
+        => setting.SettingType == ConfigSettingType.Float
+            ? setting.Value.AsFloat().ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : setting.Value.AsInt().ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    // Sliders are integer-only, so a float setting is carried at 100x and divided back.
+    private const int FloatScale = 100;
+
+    private static int ToSliderInt(ConfigSetting setting, JsonObject value)
+        => setting.SettingType == ConfigSettingType.Float
+            ? (int)Math.Round(value.AsFloat() * FloatScale)
+            : value.AsInt();
+
+    private static bool OnSlider(ConfigSetting setting, int value)
+    {
+        setting.Value = setting.SettingType == ConfigSettingType.Float
+            ? FromFloat(value / (float)FloatScale)
+            : FromInt(value);
+        return true;
+    }
+
+    private static void OnNumberTyped(ConfigSetting setting, string text)
+    {
+        if (setting.SettingType == ConfigSettingType.Float)
+        {
+            if (float.TryParse(text, out float parsed)) setting.Value = FromFloat(parsed);
+        }
+        else if (int.TryParse(text, out int parsed)) setting.Value = FromInt(parsed);
+    }
+
+    private static void OnJsonTyped(ConfigSetting setting, string text)
+    {
+        // Half-typed JSON is normal while editing; keep the last good value instead of
+        // throwing on every keystroke.
+        try { setting.Value = new JsonObject(JToken.Parse(text)); }
+        catch (Exception) { }
+    }
+
+    private static JsonObject FromBool(bool value) => new(new JValue(value));
+    private static JsonObject FromInt(int value) => new(new JValue(value));
+    private static JsonObject FromFloat(float value) => new(new JValue(value));
+    private static JsonObject FromString(string value) => new(new JValue(value));
+
+    // ------------------------------------------------------------------ actions
+
+    private void OnDomainSelected(string domain, bool selected)
+    {
+        if (!selected || domain == _domain) return;
+
+        _domain = domain;
+        Compose();
+        LoadControlValues();
+    }
+
+    private void OnScroll(float value)
+    {
+        if (_contentBounds == null) return;
+
+        _contentBounds.fixedY = -value;
+        _contentBounds.CalcWorldBounds();
+    }
+
+    private bool OnSave()
+    {
+        _configs[_domain].WriteToFile();
+        capi.TriggerIngameError(this, "saved", $"Saved settings for {DisplayName(_domain)}.");
+        return true;
+    }
+
+    private bool OnReload()
+    {
+        _configs[_domain].ReadFromFile();
+        Compose();
+        LoadControlValues();
+        return true;
+    }
+
+    private bool OnDefaults()
+    {
+        _configs[_domain].RestoreToDefaults();
+        Compose();
+        LoadControlValues();
+        return true;
+    }
+
+    private void OnClose() => TryClose();
+
+    public override bool TryOpen()
+    {
+        bool opened = base.TryOpen();
+        if (opened) LoadControlValues();
+        return opened;
+    }
+
+    public override bool ShouldReceiveRenderEvents() => IsOpened();
+}
