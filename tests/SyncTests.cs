@@ -20,6 +20,7 @@ public class SyncTests
 {
     private const string Domain = "demomod";
 
+    [SingleplayerOnly]
     [VsTest(TimeoutMs = 60000)]
     public async Task ServerLoadsTheFixtureConfig()
     {

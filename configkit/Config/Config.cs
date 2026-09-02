@@ -843,6 +843,11 @@ public sealed class Config : IConfig, IDisposable
     {
         string root = Path.GetFullPath(Path.Combine(api.DataBasePath, "ModConfig"));
 
+        // A client that has never written a config has no ModConfig directory, and
+        // StreamWriter does not create one. On a client joined to a remote server this is
+        // the first thing that touches it.
+        try { Directory.CreateDirectory(root); } catch (Exception) { }
+
         string candidate = string.IsNullOrWhiteSpace(fileName) ? "config.yaml" : fileName!;
         string resolved;
 

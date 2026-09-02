@@ -63,6 +63,7 @@ public class ConfigDialogTests
         dialog.TryClose();
     }
 
+    [SingleplayerOnly]
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]
     public async Task EverySettingGetsAControl()

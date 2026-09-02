@@ -157,6 +157,7 @@ public class ManagedConfigTests
         Assert.False(settings.Enabled, "Enabled should have been assigned back onto the object");
     }
 
+    [SingleplayerOnly]
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]
     public async Task ManagedConfigRendersWithReadableLabels()
