@@ -5,8 +5,8 @@ This is the honest diff: what was rebuilt, what was fixed, and which of those bu
 still present upstream.
 
 Everything marked **inherited** was verified against configlib's own source, not guessed
-at. Everything marked **ours** was introduced by this project — mostly by the GUI rewrite
-— and is listed for the same reason as the rest.
+at. Everything marked **ours** was introduced by this project, mostly by the GUI rewrite,
+and is listed for the same reason as the rest.
 
 ---
 
@@ -25,7 +25,7 @@ at. Everything marked **ours** was introduced by this project — mostly by the 
   every bug below.
 - **A two-process multiplayer test tier** (contributed to
   [vstestkit](https://github.com/dizzyd/vstestkit)): a real server and a client joined
-  over a socket, because a singleplayer session never takes the sync code's other branch —
+  over a socket, because a singleplayer session never takes the sync code's other branch,
   which is where the two worst bugs were hiding.
 - **Build-time verification**: the assembly may declare only its own namespaces, every
   third-party dll must match its publisher's hash, and each must ship its licence.
@@ -40,7 +40,7 @@ at. Everything marked **ours** was introduced by this project — mostly by the 
 
 - `ReflectionContext` and `StatsContext` from the vendored expression engine. Unreachable,
   but they invoked members by string name with `BindingFlags.NonPublic` on an arbitrary
-  object — a primitive useful to nobody but an attacker.
+  object, a primitive useful to nobody but an attacker.
 
 ---
 
@@ -48,20 +48,20 @@ at. Everything marked **ours** was introduced by this project — mostly by the 
 
 ### Sync and configuration
 
-**A managed config was emptied on a remote server** — *inherited*.
+**A managed config was emptied on a remote server** (*inherited*).
 Three constructors assigned `_clientSideSettings` the *same dictionary object* as
 `_settings`; `SyncFromServer`'s multiplayer branch clears it and then iterates `_settings`,
-so the loop ran zero times. Every setting vanished, while the window still drew every row —
+so the loop ran zero times. Every setting vanished, while the window still drew every row,
 so a player could edit and save into nothing. Singleplayer takes the other branch, which is
 why it went unnoticed.
 
-**Values loaded from file never reached the mod's object** — *inherited*.
+**Values loaded from file never reached the mod's object** (*inherited*).
 `AssignSettingsValues` was implemented, exposed on the API, and called from nowhere. A mod
 ran on its compiled-in defaults while both the file and the settings screen showed the
 player's edits.
 
-**Patches compounded on a client** — *inherited*.
-Patching runs twice there — once over local configs, again when the server's arrive — and
+**Patches compounded on a client** (*inherited*).
+Patching runs twice there (once over local configs, again when the server's arrive) and
 rewrites the asset in place, so `"value * 2"` became ×4. Patching now starts from the
 asset's pristine bytes and is idempotent however often it runs.
 
@@ -70,69 +70,69 @@ newer one.
 
 ### Crashes and data loss
 
-**Duplicate sorting weights silently emptied the whole config** — *inherited*.
+**Duplicate sorting weights silently emptied the whole config** (*inherited*).
 The de-duplication added a fixed `1E-10f`, which float32 loses entirely at any weight of 1
 or more, so the insert threw and the mod was left with no settings at all.
 
-**An unknown enum mapping key threw `KeyNotFoundException`** — *inherited*.
+**An unknown enum mapping key threw `KeyNotFoundException`** (*inherited*).
 Reachable from the network: a server whose build renamed an enum member crashed the
 client's join.
 
-**Unboxing casts on config fields threw** — *inherited*.
+**Unboxing casts on config fields threw** (*inherited*).
 `(float)value` on a boxed `double`, a `long`, an enum, or a `[DefaultValue(3)]` int over a
-float field — each took the mod's *entire* registration down, not just that setting. The
+float field. Each took the mod's *entire* registration down, not just that setting. The
 assign-back path had the mirror bug. `double`, `long` and enum fields now work.
 
-**`JsonObjectPath.Set` counted a lazy sequence after mutating through it** — *inherited*.
+**`JsonObjectPath.Set` counted a lazy sequence after mutating through it** (*inherited*).
 
-**A config-reload event naming an unknown domain** threw out of the event bus — *inherited*.
+**A config-reload event naming an unknown domain** threw out of the event bus (*inherited*).
 
 ### Lifecycle
 
-**The shared file watcher was destroyed by the first config disposed** — *inherited*.
+**The shared file watcher was destroyed by the first config disposed** (*inherited*).
 Configs in a directory share one `FileSystemWatcher` in a static dictionary; `Dispose`
 disposed it outright and cleared the whole path registry, so whichever config went first
 killed live reload for every other config in the process and left a disposed watcher
 cached for anything created later. The only symptom was that editing a config file quietly
 stopped working.
 
-**`ReloadConfigs` orphaned the config it replaced** — *inherited*.
+**`ReloadConfigs` orphaned the config it replaced** (*inherited*).
 It stayed registered in those static tables holding a handler bound to a session that had
 ended.
 
-**Dispose re-patched the pause menu instead of unpatching it** — *inherited*.
+**Dispose re-patched the pause menu instead of unpatching it** (*inherited*).
 `Patch()` was called from both `Start` and `Dispose` while `Unpatch()` sat unused, so every
 world reload stacked another Harmony prefix on a method that runs for every button in the
 pause menu.
 
-**Harmony patches were registered under the id `"configlib"`** — *inherited*.
+**Harmony patches were registered under the id `"configlib"`** (*inherited*).
 configlib's own `UnpatchAll` would have removed them.
 
-**`Unpatch` removed every mod's prefix, not just ours** — *ours*.
+**`Unpatch` removed every mod's prefix, not just ours** (*ours*).
 Harmony's third parameter defaults to `"*"`, and constructing the instance with our id does
 not scope the call. Introduced when Dispose was corrected to unpatch; it would have
 stripped configlib's pause-menu button in exactly the case stand-down exists to avoid.
 
 ### Security
 
-**A hostile server could make a client write a file anywhere** — *inherited*.
+**A hostile server could make a client write a file anywhere** (*inherited*).
 The domain and file name in a synced config come from the server and reached
 `Path.Combine` unchecked, which honours `..`, absolute and rooted paths. Config paths are
 now contained under `ModConfig` or refused.
 
-**Server-authoritative settings were editable by unprivileged players** — *ours*.
+**Server-authoritative settings were editable by unprivileged players** (*ours*).
 configlib's ImGui window disabled them; the Cairo rewrite dropped the check, so a player
 could drag a server slider and then run on a value the server never agreed to.
 
 ### Interface
 
-**A client whose server does not run ConfigKit had no settings window** — *inherited*.
+**A client whose server does not run ConfigKit had no settings window** (*inherited*).
 It was built only from the server's config registry, so the hotkey and the pause-menu
 button did nothing while the client's own configs sat loaded and editable.
 
-**A `values` list of numbers rendered as blank rows** — *ours*.
+**A `values` list of numbers rendered as blank rows** (*ours*).
 `JsonObject.AsString` returns the default for any non-string token, so
-`[AllowedValues(1,2,3)]` produced empty dropdown entries that wrote `""` back — which then
+`[AllowedValues(1,2,3)]` produced empty dropdown entries that wrote `""` back, which then
 threw on the next read.
 
 **A fresh client had no `ModConfig` directory** and the first config write threw. Only

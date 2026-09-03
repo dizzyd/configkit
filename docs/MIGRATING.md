@@ -12,14 +12,14 @@ Most mods need **no changes at all**. Find your case below.
 
 | If your mod… | You need to… |
 |---|---|
-| has no C# — just a `configlib-patches.json` | **do nothing** |
+| has no C#, just a `configlib-patches.json` | **do nothing** |
 | checks `GetMod("configlib")` in C# | **change one line** |
 | calls `GetModSystem<ConfigLibModSystem>()` | **change a reference and rebuild** |
 | draws its own settings screen with ImGui | **replace it with a settings class** |
 
 ---
 
-## Case 1 — content mods: nothing to do
+## Case 1: content mods, nothing to do
 
 ConfigKit reads `assets/<yourmod>/config/configlib-patches.json` exactly as configlib
 does, and writes the same config file. Your mod works under either library with no
@@ -29,7 +29,7 @@ Nothing below applies to you. You're done.
 
 ---
 
-## Case 2 — you check whether configlib is installed
+## Case 2: you check whether configlib is installed
 
 Accept either library:
 
@@ -47,7 +47,7 @@ keeps working for players who have configlib.
 
 ---
 
-## Case 3 — you call into the library from C#
+## Case 3: you call into the library from C#
 
 Three edits.
 
@@ -73,18 +73,18 @@ GetModSystem<ConfigLibModSystem>()                // → GetModSystem<ConfigKitM
 "dependencies": { "configkit": "" }
 ```
 
-Everything else is the same — `GetConfig`, `GetSetting`, `AssignSettingsValues` and the
+Everything else is the same. `GetConfig`, `GetSetting`, `AssignSettingsValues` and the
 `SettingChanged` events all keep their names and signatures.
 
 ---
 
-## Case 4 — you draw your own settings screen with ImGui
+## Case 4: you draw your own settings screen with ImGui
 
 `RegisterCustomConfig` is gone, because it handed you an ImGui drawing callback and
 ConfigKit has no ImGui. Instead, describe your settings and let ConfigKit draw them.
 
 ```csharp
-// before — you draw the widgets
+// before: you draw the widgets
 api.ModLoader.GetModSystem<ConfigLibModSystem>()
     .RegisterCustomConfig("mymod", (id, buttons) =>
     {
@@ -94,7 +94,7 @@ api.ModLoader.GetModSystem<ConfigLibModSystem>()
 ```
 
 ```csharp
-// after — you describe the settings
+// after: you describe the settings
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 
@@ -114,13 +114,13 @@ api.ModLoader.GetModSystem<ConfigKitModSystem>()
 ```
 
 ConfigKit writes `ModConfig/mymod.json`, draws the settings screen, and assigns values
-straight onto your object — both what it reads from the file at startup and anything the
+straight onto your object: both what it reads from the file at startup and anything the
 player edits afterwards.
 
 This is usually **less** code than you had. A screen with forty sliders becomes forty
 `[Range]` attributes.
 
-Those attributes are plain .NET (`System.ComponentModel`), not ConfigKit types — so your
+Those attributes are plain .NET (`System.ComponentModel`), not ConfigKit types, so your
 settings class has no reference to ConfigKit and still compiles and runs if ConfigKit
 isn't installed.
 
@@ -134,7 +134,7 @@ isn't installed.
 | `[Category("…")]` | Groups settings under a heading |
 | `[AllowedValues(…)]` | Dropdown of fixed choices |
 
-The label comes from the field name, tidied up — `SearchRadius` shows as "Search radius" —
+The label comes from the field name, tidied up, so `SearchRadius` shows as "Search radius",
 unless your mod ships a translation for `<yourmod>:setting-SearchRadius`.
 
 ### Field types
@@ -144,7 +144,7 @@ dropdown of its member names.
 
 > Under configlib, a `double`, a `long`, an enum, or a `[DefaultValue(3)]` on a `float`
 > field throws while reading your defaults and takes the **whole** registration down with
-> it — which is why some mods carry a comment about using `float` rather than `double`.
+> it, which is why some mods carry a comment about using `float` rather than `double`.
 > That is fixed here; you can drop the workaround.
 
 ---
@@ -154,18 +154,18 @@ dropdown of its member names.
 - **Settings carry over.** ConfigKit writes the same `ModConfig/<yourmod>.yaml` files, so
   players keep their existing values.
 - **Don't ship both.** If configlib or autoconfiglib is installed, ConfigKit stands down
-  and logs why, so nothing breaks — but only one of them manages configs.
+  and logs why, so nothing breaks, but only one of them manages configs.
 - **Multiplayer needs it on both sides.** A server running ConfigKit needs its clients to
   have ConfigKit, the same as configlib.
 - **Server settings are read-only for ordinary players.** On a multiplayer client, a
   setting that is not `clientSide` is shown but not editable without the `controlserver`
-  privilege — an edit would never be sent or saved, so offering it would only mislead.
+  privilege. An edit would never be sent or saved, so offering it would only mislead.
   Mark anything a player should own with `"clientSide": true`.
 - **No vsimgui dependency.** You can drop it if it was only there for your config screen.
 
 ## If something behaves differently
 
-ConfigKit fixes a number of bugs that are still present upstream — including two that stop
+ConfigKit fixes a number of bugs that are still present upstream, including two that stop
 managed configs working properly on a real multiplayer server. If your mod behaved oddly
 under configlib and behaves differently here, [what changed](CHANGES-FROM-CONFIGLIB.md)
 lists them.

@@ -1,6 +1,6 @@
 # Config file format
 
-A reference for `configlib-patches.json` — the file that gives a mod settings without any
+A reference for `configlib-patches.json`, the file that gives a mod settings without any
 C#. ConfigKit reads the same format configlib does, so an existing file needs no changes.
 
 Put it at:
@@ -88,14 +88,14 @@ edited as text.
 | `link` | all | A URL written into the config file as a comment. |
 | `logarithmic` | numeric | Slider scales logarithmically. |
 | `range` | numeric | `{ "min": …, "max": …, "step": … }`. Gives a slider instead of a text box. |
-| `values` | all | A fixed list of allowed values — a dropdown. |
+| `values` | all | A fixed list of allowed values: a dropdown. |
 | `mapping` | all | Named choices: `{ "Gentle": 0, "Brutal": 2 }`. The player picks a name, patches get the value. |
 
 ---
 
 ## Patches
 
-Patches write setting values into game assets — yours, another mod's, or vanilla's. This
+Patches write setting values into game assets: yours, another mod's, or vanilla's. This
 is how a content mod becomes configurable, and how a server admin retunes a pack from one
 file without repacking anything.
 
@@ -129,7 +129,7 @@ Numeric types accept **expressions**, not just setting names.
 | `@domain:path/*` | every asset matching the wildcard |
 
 On a **client**, patches to `itemtypes`, `blocktypes`, `entities` and `recipes` are
-skipped — the server owns those and syncs the result, so patching them locally would
+skipped. The server owns those and syncs the result, so patching them locally would
 desync the two.
 
 ### JSON paths
@@ -247,6 +247,6 @@ Separators may also appear inline in the array form of `settings`, with
 
 The format is configlib's, and this reference draws on its
 [JSON API documentation](https://github.com/maltiez2/vsmod_configlib/wiki) written by
-**Somnium** — including the list of expression functions. Both are CC0. Every claim here
+**Somnium**, including the list of expression functions. Both are CC0. Every claim here
 was checked against ConfigKit's own parser, so where the two differ this describes
 ConfigKit.
