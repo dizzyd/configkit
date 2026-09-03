@@ -71,8 +71,31 @@ GetModSystem<ConfigLibModSystem>()                // → GetModSystem<ConfigKitM
 "dependencies": { "configkit": "" }
 ```
 
-Everything else is the same. `GetConfig`, `GetSetting`, `AssignSettingsValues` and the
-`SettingChanged` events all keep their names and signatures.
+Everything else is the same. `GetConfig`, `GetSetting`, `AssignSettingsValues`,
+`RegisterCustomManagedConfig` and the `SettingChanged` events all keep their names and
+signatures.
+
+`RegisterCustomManagedConfig` is kept as an alias of `RegisterManagedConfig`, which is
+what it is called here. Both work; new code should use the shorter one.
+
+### If you find configlib by reflection rather than by reference
+
+Some mods look the mod system up by type name instead of referencing the assembly:
+
+```csharp
+// before
+ModSystem? system = api.ModLoader.GetModSystem("ConfigLib.ConfigLibModSystem");
+MethodInfo? register = system?.GetType().GetMethod("RegisterCustomManagedConfig");
+
+// after - the type name is all that changes
+ModSystem? system = api.ModLoader.GetModSystem("ConfigKit.ConfigKitModSystem");
+MethodInfo? register = system?.GetType().GetMethod("RegisterCustomManagedConfig");
+```
+
+That is deliberate: the member names and signatures are configlib's, so a reflection-based
+integration only needs the mod id and the type name changed. If you match on the full
+parameter list, it is unchanged too — `(string, object, string, Action, Action<string>,
+Action)`.
 
 ---
 

@@ -87,6 +87,20 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         _customManagedConfigs.Add(domain);
     }
 
+    /// <summary>
+    /// configlib's name for <see cref="RegisterManagedConfig"/>, kept so a mod that reaches
+    /// the library by reflection finds it here too.
+    ///
+    /// Several mods do exactly that - look the method up by name, check its parameter list,
+    /// and log "ConfigLib found but RegisterCustomManagedConfig not available" when it is
+    /// missing - so without this alias their settings screen silently disappears under
+    /// ConfigKit even though nothing else about them needs changing. The parameter list is
+    /// configlib's, exactly: some of those callers match on the full six-type signature and
+    /// would reject anything else.
+    /// </summary>
+    public void RegisterCustomManagedConfig(string domain, object configObject, string? path = null, Action? onSyncedFromServer = null, Action<string>? onSettingChanged = null, Action? onConfigSaved = null)
+        => RegisterManagedConfig(domain, configObject, path, onSyncedFromServer, onSettingChanged, onConfigSaved);
+
     public event Action? ConfigWindowClosed;
     public event Action? ConfigWindowOpened;
     public event Action<string, IConfig, ISetting>? SettingChanged;

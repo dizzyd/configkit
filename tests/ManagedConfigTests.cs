@@ -157,6 +157,40 @@ public class ManagedConfigTests
         Assert.False(settings.Enabled, "Enabled should have been assigned back onto the object");
     }
 
+    /// <summary>
+    /// Several mods reach configlib by reflection rather than by reference, and look this
+    /// method up by name and full signature - Weapon Out and Multi Signpost match on the
+    /// six-type array below, Divine Ascension checks each parameter type in turn and logs
+    /// "ConfigLib API has changed" otherwise. ConfigKit calls the method
+    /// RegisterManagedConfig, so without the alias those mods silently lose their settings
+    /// screen. This is the lookup they perform, verbatim.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task ConfiglibsNameForRegisterManagedConfigStillResolves()
+    {
+        await OnClient();
+
+        ConfigKitModSystem system = Capi.ModLoader.GetModSystem<ConfigKitModSystem>();
+
+        System.Reflection.MethodInfo? method = system.GetType().GetMethod(
+            "RegisterCustomManagedConfig",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public,
+            null,
+            new[] { typeof(string), typeof(object), typeof(string), typeof(Action), typeof(Action<string>), typeof(Action) },
+            null);
+
+        Assert.NotNull(method);
+
+        // And it has to actually register, not just exist.
+        DemoSettings settings = new();
+        method!.Invoke(system, new object?[] { "aliasdemo", settings, "configkit-aliasdemo.json", null, null, null });
+
+        IConfig? config = system.GetConfig("aliasdemo");
+        Assert.NotNull(config);
+        Assert.Equal(12, config!.GetSetting("SearchRadius")!.Value.AsInt());
+    }
+
     [SingleplayerOnly]
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]

@@ -205,19 +205,21 @@ edited by hand. Asset patches still apply, because ConfigKit applies them.
 "configlib"                          ->  "configkit"
 ConfigLib.ConfigLibModSystem         ->  ConfigKit.ConfigKitModSystem
 configlib:{id}:setting-changed       ->  configkit:{id}:setting-changed
-RegisterCustomManagedConfig          ->  RegisterManagedConfig
 ```
 
 All four event-bus topics rename the same way — `setting-changed`, `setting-loaded`,
-`config-saved` and `configlib:config-reload`. `GetConfig`, `GetSetting`, `SettingChanged` and
-`ConfigsLoaded` keep their names, so a reflection-based integration usually needs nothing else.
+`config-saved` and `configlib:config-reload`. **Method names do not change at all**:
+`GetConfig`, `GetSetting`, `SettingChanged`, `ConfigsLoaded` and `RegisterCustomManagedConfig`
+all resolve, with configlib's signatures, so a reflection-based integration needs nothing
+beyond the two strings above.
 
-The exception is **`RegisterCustomManagedConfig`**, which ConfigKit calls `RegisterManagedConfig`.
-The signature is identical — `(domain, configObject, path, onSyncedFromServer, onSettingChanged,
-onConfigSaved)` — only the name differs. Ad Astra, Multi Signpost, Divine Ascension, Weapon Out
-and Extra Overlays all look it up by that string and log a warning when it is missing, so under
-ConfigKit they report "ConfigLib found but RegisterCustomManagedConfig not available" and skip
-their config screen.
+> `RegisterCustomManagedConfig` is an alias; ConfigKit's own name for it is
+> `RegisterManagedConfig`. The alias exists because this survey found four mods — Ad Astra,
+> Multi Signpost, Divine Ascension and Weapon Out — looking that method up by name and
+> matching on its full parameter list `(string, object, string, Action, Action<string>,
+> Action)`, and logging "ConfigLib found but RegisterCustomManagedConfig not available" when
+> it is absent. Extra Overlays looks for a four-parameter version that configlib has never
+> had, so its managed-config registration is already dead against configlib itself.
 
 | mod | mod id | patches | what it does with configlib |
 |---|---|:-:|---|
