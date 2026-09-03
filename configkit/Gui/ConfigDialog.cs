@@ -184,7 +184,7 @@ public class ConfigDialog : GuiDialog
         {
             if (block is IFormattingBlock formatting)
             {
-                y = AddFormattingBlock(composer, formatting, y);
+                y = AddFormattingBlock(composer, formatting, y, index++);
                 continue;
             }
 
@@ -204,10 +204,10 @@ public class ConfigDialog : GuiDialog
 
             bool locked = IsServerControlled(setting);
 
-            composer.AddStaticText(
+            composer.AddDynamicText(
                 locked ? LabelFor(setting) + " (server)" : LabelFor(setting),
                 locked ? CairoFont.WhiteDetailText().WithColor(GuiStyle.ColorParchment) : CairoFont.WhiteDetailText(),
-                labelBounds);
+                labelBounds, key + "-label");
 
             if (!string.IsNullOrEmpty(setting.Comment))
             {
@@ -218,7 +218,8 @@ public class ConfigDialog : GuiDialog
             {
                 // Editable here but never sent or saved, so the client would simply run on a
                 // value the server never agreed to. Show it, do not offer to change it.
-                composer.AddStaticText(ValueText(setting), CairoFont.WhiteDetailText(), controlBounds);
+                composer.AddDynamicText(ValueText(setting), CairoFont.WhiteDetailText(),
+                    controlBounds, key + "-value");
             }
             else
             {
@@ -231,19 +232,19 @@ public class ConfigDialog : GuiDialog
         return y;
     }
 
-    private static double AddFormattingBlock(GuiComposer? composer, IFormattingBlock block, double y)
+    private static double AddFormattingBlock(GuiComposer? composer, IFormattingBlock block, double y, int index)
     {
         if (block.Title != null)
         {
-            composer?.AddStaticText(block.Title, CairoFont.WhiteSmallText().WithWeight(Cairo.FontWeight.Bold),
-                ElementBounds.Fixed(0, y + 10, DialogWidth - 40, 26));
+            composer?.AddDynamicText(block.Title, CairoFont.WhiteSmallText().WithWeight(Cairo.FontWeight.Bold),
+                ElementBounds.Fixed(0, y + 10, DialogWidth - 40, 26), $"heading-{index}");
             y += 40;
         }
 
         if (block.Text != null)
         {
-            composer?.AddStaticText(block.Text, CairoFont.WhiteDetailText(),
-                ElementBounds.Fixed(0, y, DialogWidth - 40, 24));
+            composer?.AddDynamicText(block.Text, CairoFont.WhiteDetailText(),
+                ElementBounds.Fixed(0, y, DialogWidth - 40, 24), $"headtext-{index}");
             y += 28;
         }
 
