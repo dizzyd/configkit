@@ -19,8 +19,8 @@ pause menu.
 - Settings the server controls are shown read-only unless you have `controlserver`.
 - Your settings live in `ModConfig/`. Edit a file while the game is running and it
   reloads on the spot.
-- **Don't install ConfigKit and ConfigLib together.** If ConfigKit sees ConfigLib or
-  AutoConfigLib it stands down and says so in the log, so nothing breaks — but only one
+- **Don't install ConfigKit and configlib together.** If ConfigKit sees configlib or
+  autoconfiglib it stands down and says so in the log, so nothing breaks — but only one
   of them manages your configs.
 - On a server, both sides need it: a client without ConfigKit simply gets no settings
   screen.
@@ -73,17 +73,17 @@ audit of behaviour. Read the source; it's short.
 
 ## Origin, and credit
 
-ConfigKit is derived from **[ConfigLib](https://github.com/maltiez2/vsmod_configlib)** by
+ConfigKit is derived from **[configlib](https://github.com/maltiez2/vsmod_configlib)** by
 **Maltiez**, released under CC0. The config model, the patch format, the expression
-syntax and the server-sync design are all his work, and they are good work — ConfigLib
+syntax and the server-sync design are all his work, and they are good work — configlib
 solved a real problem for hundreds of mods and its file format is the reason ConfigKit
 can read existing mods without asking anyone to change anything. Each derived file says
 so in its header.
 
-This fork exists because, for a period, ConfigLib's published builds contained a class
+This fork exists because, for a period, configlib's published builds contained a class
 that appeared in no commit of its public source, which fingerprinted other loaded
 assemblies and degraded or disconnected multiplayer clients after a randomised delay.
-Those releases have since been withdrawn, and current ConfigLib builds match their
+Those releases have since been withdrawn, and current configlib builds match their
 public source — I checked, and say so gladly.
 
 Nothing here is a judgement of the person. But the principle matters more than any one
@@ -92,7 +92,7 @@ it does.** A mod should do what its source says it does, and nothing else. That'
 whole reason for the verification above — not because this project is more trustworthy,
 but because trust shouldn't be the mechanism.
 
-If you use ConfigLib today and it works for you, that's a perfectly reasonable choice.
+If you use configlib today and it works for you, that's a perfectly reasonable choice.
 
 ---
 
@@ -114,5 +114,5 @@ run.sh <tests> --mod configkit/configkit --mods tests/fixtures/Mods --multiplaye
 
 MIT — see [LICENSE](LICENSE). Third-party notices are in
 [`configkit/licenses/`](configkit/licenses/): YamlDotNet (MIT), SimpleExpressionEngine
-(CC0), and ConfigLib (CC0), whose public-domain dedication is what makes this fork
+(CC0), and configlib (CC0), whose public-domain dedication is what makes this fork
 possible.

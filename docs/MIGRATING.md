@@ -1,6 +1,6 @@
-# Migrating from ConfigLib to ConfigKit
+# Migrating from configlib to ConfigKit
 
-ConfigKit does what ConfigLib does, without the Dear ImGui dependency. It reads the same
+ConfigKit does what configlib does, without the Dear ImGui dependency. It reads the same
 `configlib-patches.json` files and writes the same `ModConfig/<yourmod>.yaml`, so your
 players keep their settings.
 
@@ -21,7 +21,7 @@ Most mods need **no changes at all**. Find your case below.
 
 ## Case 1 — content mods: nothing to do
 
-ConfigKit reads `assets/<yourmod>/config/configlib-patches.json` exactly as ConfigLib
+ConfigKit reads `assets/<yourmod>/config/configlib-patches.json` exactly as configlib
 does, and writes the same config file. Your mod works under either library with no
 changes and no new dependency.
 
@@ -29,7 +29,7 @@ Nothing below applies to you. You're done.
 
 ---
 
-## Case 2 — you check whether ConfigLib is installed
+## Case 2 — you check whether configlib is installed
 
 Accept either library:
 
@@ -43,7 +43,7 @@ bool configAvailable = api.ModLoader.GetMod("configkit") != null
 ```
 
 That's the whole change. You still need no reference to either library, and your mod
-keeps working for players who have ConfigLib.
+keeps working for players who have configlib.
 
 ---
 
@@ -139,10 +139,10 @@ isn't installed.
 
 - **Settings carry over.** ConfigKit writes the same `ModConfig/<yourmod>.yaml` files, so
   players keep their existing values.
-- **Don't ship both.** If ConfigLib or AutoConfigLib is installed, ConfigKit stands down
+- **Don't ship both.** If configlib or autoconfiglib is installed, ConfigKit stands down
   and logs why, so nothing breaks — but only one of them manages configs.
 - **Multiplayer needs it on both sides.** A server running ConfigKit needs its clients to
-  have ConfigKit, the same as ConfigLib.
+  have ConfigKit, the same as configlib.
 - **No vsimgui dependency.** You can drop it if it was only there for your config screen.
 
 ## Getting help
