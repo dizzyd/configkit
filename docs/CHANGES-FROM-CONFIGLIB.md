@@ -55,8 +55,16 @@ marked **ours** was introduced by this project, mostly by the GUI rewrite.
 - **A value beside every slider**, showing the setting's own number rather than the
   slider's: sliders are integer-only, so a float rides at 100x and vanilla's in-track text
   would read 250 for a value of 2.5.
+- **A Reset button on every setting.** configlib offers only "Restore defaults" for the
+  whole config, which is no use to a player who has changed six settings and wants one of
+  them back. Resetting a row touches nothing else and does not recompose the window, so it
+  keeps its scroll position.
 - A colour swatch beside the hex field, panels sized to their content, and
   `ConfigsReceivedFromServer` so a mod can tell synced values from local defaults.
+- **`RegisterCustomManagedConfig` kept as an alias** of `RegisterManagedConfig`, with
+  configlib's exact parameter list. Several mods reach the library by reflection and match
+  on that name and signature; without the alias they log "ConfigLib found but
+  RegisterCustomManagedConfig not available" and drop their settings screen.
 
 ## Removed
 

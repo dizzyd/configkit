@@ -151,6 +151,120 @@ public class ConfigDialogTests
     }
 
     /// <summary>
+    /// "Restore defaults" at the bottom is all-or-nothing. A player who has changed six
+    /// settings and wants one back needs the per-row button, and it has to leave the other
+    /// five alone - including the ones sharing a control type with it.
+    /// </summary>
+    [SingleplayerOnly]
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task ResettingOneSettingLeavesTheRestAlone()
+    {
+        await OnClient();
+
+        ConfigDialog dialog = OpenDemoDialog();
+        await Frames.Wait(10);
+
+        Config config = (Config)dialog.Configs["demo"];
+        ISetting radius = config.GetSetting("radius")!;
+        ISetting speed = config.GetSetting("speed")!;
+        ISetting label = config.GetSetting("label")!;
+        ISetting enabled = config.GetSetting("enabled")!;
+
+        radius.Value = new JsonObject(new JValue(33));
+        speed.Value = new JsonObject(new JValue(3.75f));
+        label.Value = new JsonObject(new JValue("headstone"));
+        enabled.Value = new JsonObject(new JValue(false));
+        await Frames.Wait(2);
+
+        Assert.True(dialog.ResetSetting("radius"), "radius was not on screen to reset");
+        await Frames.Wait(2);
+
+        Assert.Equal(12, radius.Value.AsInt());
+
+        // The other four keep the edit. A reset that quietly restored the whole config
+        // would pass an assertion on radius alone.
+        Assert.Close(3.75f, speed.Value.AsFloat(), 0.001f);
+        Assert.Equal("headstone", label.Value.AsString(""));
+        Assert.False(enabled.Value.AsBool(), "enabled should still be the edited value");
+
+        // The readout beside the reset slider has to follow the value, or the row goes on
+        // showing 33 while the config holds 12. (Speed's readout is not checked: it was
+        // edited through the setting rather than the slider, so it was never in sync to
+        // begin with - only a reset or a recompose pushes a value into a widget.)
+        Assert.Equal("12", dialog.SliderValueTexts["radius"]);
+
+        await Shot.Take("configkit-reset-one");
+        dialog.TryClose();
+    }
+
+    /// <summary>
+    /// A dropdown does not read its own setting per frame - it is composed with a selected
+    /// index - so a reset has to push the new selection into it. The rest of the window
+    /// reloads on recompose; this one does not.
+    /// </summary>
+    [SingleplayerOnly]
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task ResettingADropdownMovesTheSelection()
+    {
+        await OnClient();
+
+        ConfigDialog dialog = OpenDemoDialog();
+        await Frames.Wait(10);
+
+        Config config = (Config)dialog.Configs["demo"];
+        ISetting mode = config.GetSetting("mode")!;
+
+        mode.Value = new JsonObject(new JValue("brutal"));
+        await Frames.Wait(2);
+        Assert.Equal("brutal", mode.Value.AsString(""));
+
+        Assert.True(dialog.ResetSetting("mode"), "mode was not on screen to reset");
+        await Frames.Wait(2);
+
+        Assert.Equal("balanced", mode.Value.AsString(""));
+
+        dialog.TryClose();
+    }
+
+    /// <summary>
+    /// An enum setting stores its default as the mapping key, not the mapped value, so the
+    /// reset has to go back through MappingKey - which is also what carries the choice onto
+    /// the mod's own object.
+    /// </summary>
+    [SingleplayerOnly]
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task ResettingAMappedSettingRestoresItsKey()
+    {
+        await OnClient();
+
+        ManagedConfigTests.AwkwardTypes settings = new();
+        Config config = new(Capi, "resetmapped", "Reset Mapped", settings, "configkit-resetmapped.json");
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { ["resetmapped"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(10);
+
+        ISetting level = config.GetSetting("Level")!;
+        Assert.Equal("Normal", level.MappingKey);
+
+        level.MappingKey = "Brutal";
+        await Frames.Wait(2);
+
+        Assert.True(dialog.ResetSetting("Level"), "Level was not on screen to reset");
+        await Frames.Wait(2);
+
+        Assert.Equal("Normal", level.MappingKey);
+
+        // And the value the key maps to, since that is what reaches the mod.
+        config.AssignSettingsValues(settings);
+        Assert.Equal(ManagedConfigTests.Difficulty.Normal, settings.Level);
+
+        dialog.TryClose();
+    }
+
+    /// <summary>
     /// More settings than fit, with a rangeless number setting above the sliders. That order
     /// matters: a number input leaves the GL scissor pointing at its own box and switched
     /// off, and the next tooltip switches it back on, so every slider below one used to be

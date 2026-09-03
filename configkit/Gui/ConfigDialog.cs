@@ -35,8 +35,10 @@ public class ConfigDialog : GuiDialog
     private const double RowHeight = 32;
     private const double RowGap = 6;
     private const double LabelWidth = 330;
-    private const double ControlWidth = 300;
+    private const double ControlWidth = 250;
     private const double ValueWidth = 54;
+    private const double ResetWidth = 56;
+    private const double ResetGap = 8;
 
     private readonly Dictionary<string, Config> _configs;
     private readonly List<string> _domains;
@@ -84,6 +86,20 @@ public class ConfigDialog : GuiDialog
         => _sliderValues
             .Where(entry => _settingsByKey.ContainsKey(entry.Key))
             .ToDictionary(entry => _settingsByKey[entry.Key].YamlCode, entry => entry.Value.GetText());
+
+    /// <summary>
+    /// Restores one rendered setting to its default, exactly as that row's Reset button
+    /// does. Returns false if the window is not showing a setting with that code.
+    /// </summary>
+    public bool ResetSetting(string yamlCode)
+    {
+        foreach ((string key, ConfigSetting setting) in _settingsByKey)
+        {
+            if (setting.YamlCode == yamlCode) return OnResetSetting(setting, key);
+        }
+
+        return false;
+    }
 
     public override void OnGuiOpened()
     {
@@ -251,6 +267,7 @@ public class ConfigDialog : GuiDialog
             else
             {
                 AddControl(container, setting, controlBounds, key);
+                AddResetButton(container, setting, y, key);
             }
 
             y += RowHeight + RowGap;
@@ -403,6 +420,70 @@ public class ConfigDialog : GuiDialog
     }
 
     /// <summary>
+    /// One setting's own "restore this to its default" button, beside its control.
+    ///
+    /// "Restore defaults" at the bottom of the window is all-or-nothing, which is no help
+    /// to a player who has changed six settings and wants one of them back. This resets
+    /// only its own row, and only in memory: like every other edit here, it takes Save to
+    /// reach the file.
+    /// </summary>
+    private void AddResetButton(GuiElementContainer container, ConfigSetting setting, double y, string key)
+    {
+        // Placed from the column constants rather than from the control's own bounds: a
+        // switch resizes the bounds it is given down to its own square, which would drag
+        // the button on a boolean row in to sit against the toggle while every other row's
+        // button stayed out at the right.
+        ElementBounds bounds = ElementBounds.Fixed(
+            LabelWidth + 16 + ControlWidth + ResetGap, y, ResetWidth, RowHeight - 4);
+
+        container.Add(new GuiElementTextButton(capi, "Reset",
+            CairoFont.WhiteDetailText(),
+            CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
+            () => OnResetSetting(setting, key),
+            bounds, EnumButtonStyle.Small));
+
+        container.Add(new GuiElementHoverText(capi,
+            $"Restore this setting to {DefaultText(setting)}",
+            CairoFont.WhiteDetailText(), 260, bounds.FlatCopy()));
+    }
+
+    private bool OnResetSetting(ConfigSetting setting, string key)
+    {
+        RestoreDefault(setting);
+        SyncWidget(key, setting);
+        return true;
+    }
+
+    /// <summary>
+    /// A mapped setting stores its default as the mapping *key* ("medium"), not the value
+    /// that key resolves to, so it has to go back through MappingKey - whose setter assigns
+    /// the mapped value as well. Anything else takes the default value directly.
+    /// </summary>
+    private static void RestoreDefault(ConfigSetting setting)
+    {
+        if (setting.Validation?.Mapping != null)
+        {
+            string key = setting.DefaultValue.AsString("");
+            if (setting.Validation.Mapping.ContainsKey(key))
+            {
+                setting.MappingKey = key;
+                return;
+            }
+            // The stored default is not one of the keys - a definition that changed under a
+            // saved config, or a default written as the mapped value. Setting it directly is
+            // still better than leaving the player's edit in place.
+        }
+
+        setting.Value = setting.DefaultValue.Clone();
+    }
+
+    private static string DefaultText(ConfigSetting setting)
+    {
+        string text = setting.DefaultValue.Token?.ToString() ?? "";
+        return string.IsNullOrWhiteSpace(text) ? "its default" : $"its default ({text})";
+    }
+
+    /// <summary>
     /// A slider with its current value beside it.
     ///
     /// Vanilla's own ShowTextWhenResting draws the number inside the track, where it rides
@@ -529,43 +610,66 @@ public class ConfigDialog : GuiDialog
     {
         foreach ((string key, ConfigSetting setting) in _settingsByKey)
         {
-            if (!_widgets.TryGetValue(key, out GuiElement? widget)) continue;
+            SyncWidget(key, setting);
+        }
+    }
 
-            Validation? validation = setting.Validation;
-            if (validation?.Mapping != null || validation?.Values != null) continue;
+    /// <summary>
+    /// Pushes one setting's current value into its control. Split out of LoadControlValues
+    /// so a per-setting reset can refresh its own row without recomposing the window, which
+    /// would throw away the player's scroll position on every click.
+    /// </summary>
+    private void SyncWidget(string key, ConfigSetting setting)
+    {
+        if (!_widgets.TryGetValue(key, out GuiElement? widget)) return;
 
-            switch (widget)
-            {
-                case GuiElementSwitch toggle:
-                    toggle.On = setting.Value.AsBool();
-                    break;
+        Validation? validation = setting.Validation;
 
-                case GuiElementSlider slider:
-                    slider.SetValues(
-                        ToSliderInt(setting, setting.Value),
-                        ToSliderInt(setting, validation!.Minimum!),
-                        ToSliderInt(setting, validation.Maximum!),
-                        Math.Max(1, validation.Step == null ? 1 : ToSliderInt(setting, validation.Step)));
-                    if (_sliderValues.TryGetValue(key, out GuiElementDynamicText? readout))
-                    {
-                        readout.SetNewText(NumberText(setting));
-                    }
-                    break;
+        // Dropdowns are built with their selection already set, so this only matters
+        // when the value changes underneath them - a reset, or a reload from file.
+        if (validation?.Mapping != null)
+        {
+            if (widget is GuiElementDropDown mapped) mapped.SetSelectedValue(setting.MappingKey ?? "");
+            return;
+        }
 
-                case GuiElementTextArea area:
-                    area.SetValue(setting.Value.ToString());
-                    break;
+        if (validation?.Values != null)
+        {
+            if (widget is GuiElementDropDown listed) listed.SetSelectedValue(TokenText(setting.Value));
+            return;
+        }
 
-                case GuiElementNumberInput number:
-                    number.SetValue(NumberText(setting));
-                    break;
+        switch (widget)
+        {
+            case GuiElementSwitch toggle:
+                toggle.On = setting.Value.AsBool();
+                break;
 
-                case GuiElementTextInput text:
-                    text.SetValue(setting.SettingType == ConfigSettingType.Color
-                        ? setting.Value.AsString("")
-                        : setting.Value.AsString(""));
-                    break;
-            }
+            case GuiElementSlider slider:
+                slider.SetValues(
+                    ToSliderInt(setting, setting.Value),
+                    ToSliderInt(setting, validation!.Minimum!),
+                    ToSliderInt(setting, validation.Maximum!),
+                    Math.Max(1, validation.Step == null ? 1 : ToSliderInt(setting, validation.Step)));
+                if (_sliderValues.TryGetValue(key, out GuiElementDynamicText? readout))
+                {
+                    readout.SetNewText(NumberText(setting));
+                }
+                break;
+
+            case GuiElementTextArea area:
+                area.SetValue(setting.Value.ToString());
+                break;
+
+            case GuiElementNumberInput number:
+                number.SetValue(NumberText(setting));
+                break;
+
+            case GuiElementTextInput text:
+                text.SetValue(setting.SettingType == ConfigSettingType.Color
+                    ? setting.Value.AsString("")
+                    : setting.Value.AsString(""));
+                break;
         }
     }
 

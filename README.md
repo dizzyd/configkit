@@ -18,6 +18,8 @@ Drop it in your `Mods` folder. Press **P**, or use the **Mod settings** button i
 pause menu.
 
 - Settings the server controls are shown read-only unless you have `controlserver`.
+- Every setting has its own **Reset** button, beside the control, for putting one back
+  without touching the rest. **Restore defaults** at the bottom still resets the whole mod.
 - Your settings live in `ModConfig/`. Edit a file while the game is running and it
   reloads on the spot.
 - **Don't install ConfigKit and configlib together.** If ConfigKit sees configlib or
