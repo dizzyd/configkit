@@ -13,10 +13,14 @@ bash scripts/vstk shot -o shot.png
 The mod shown is whichever comes first alphabetically by display name; drop that mod
 from the mods directory to photograph the next one.
 
-**Fornax has to come from a build, not from its ModDB zip.** It hands its config over by
-reflection against `ConfigKit.ConfigKitModSystem`, which only releases from 1.6.0 do — an
-older zip loads fine and contributes no settings at all, and the window then says "No mods
-here have settings ConfigKit can edit". Pass it the same way as ConfigKit:
+**Fornax must be 1.6.0 or newer.** It hands its config over by reflection against
+`ConfigKit.ConfigKitModSystem`, and only 1.6.0 onwards does — 1.5.x still looks for
+configlib, so it loads fine and contributes no settings at all, and the window says "No
+mods here have settings ConfigKit can edit". Take the zip from ModDB rather than from a
+pack's mods directory, which may be pinned to an older release.
+
+A build tree works too, passed the same way as ConfigKit's — its assets are unbuilt, so
+they have to come in as an origin:
 
 ```bash
 VSTK_EXTRA_MODS=<configkit>/bin/Debug/Mods:<fornax>/bin/Debug/Mods \
