@@ -39,7 +39,7 @@ marked **ours** was introduced by this project, mostly by the GUI rewrite.
 
 ## Added
 
-- **39 in-game tests** across three configurations: singleplayer, two-process
+- **45 in-game tests** across three configurations: singleplayer, two-process
   multiplayer, and a run with configlib installed. Includes standing regression tests for
   every bug below.
 - **A two-process multiplayer test tier** (contributed to
