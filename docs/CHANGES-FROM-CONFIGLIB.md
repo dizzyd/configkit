@@ -18,25 +18,24 @@ marked **ours** was introduced by this project, mostly by the GUI rewrite.
 
 ## Deliberate differences
 
-**`requiredOnClient: false`, `requiredOnServer: false`.** Both default to `true` in the
-game's own `ModInfo`, and configlib sets `true` / `false`. Ours are set the way they are on
-purpose, so please don't "correct" them back:
+**`requiredOnClient: true`, `requiredOnServer: false`, and a pinned `networkVersion`.**
 
+- `requiredOnClient: true` is not optional, however unfriendly it looks. ConfigKit registers
+  a recipe registry (`configkit:configs`) to sync configs, and a server sends every registry
+  it has to every client. The client resolves each by code with `GetRecipeRegistry`, which
+  returns **null** for one it does not know, and then calls `FromBytes` on it. A client
+  without ConfigKit joining a server with it therefore crashes to desktop with a
+  NullReferenceException in `HandleServerAssets_Step11`. With the flag set, the client is
+  turned away on the connect screen with a "mods missing" message and an offer to download,
+  which is what configlib does and why.
 - `requiredOnServer: false` keeps ConfigKit enabled on a client whose server does not have
-  it. With `true`, the client disables the mod (`SystemModHandler` puts every universal
-  `requiredOnServer` mod the server lacks into the disabled list), so a player who installs
-  ConfigKit to configure their own client-side mods would lose it the moment they joined a
-  server without it.
-- `requiredOnClient: false` lets players join a ConfigKit server without having it. They
-  still get the server's patched world, because the server sends its assets to every client
-  regardless. What they lose is the settings screen, and correct values in any mod that
-  reads its config on the client.
-
-The alternative, `requiredOnClient: true`, buys a stronger guarantee at a real price: the
-check matches on `ModID@NetworkVersion`, and `networkVersion` defaults to the mod version,
-so a 1.0.1 server would reject 1.0.0 clients. Version lockstep on a config library is the
-friction that makes configlib servers awkward to join. If this is ever flipped, it needs an
-explicit, rarely-bumped `networkVersion` alongside it.
+  it. With `true`, the client disables the mod, so a player who installs ConfigKit to
+  configure their own client-side mods would lose it the moment they joined a server without
+  it. Nothing arrives from such a server, so there is nothing to crash on.
+- `networkVersion` is pinned to `1.0.0` and deliberately not bumped per release. Clients are
+  matched on `ModID@NetworkVersion`, and it defaults to the mod version, so without pinning
+  every patch release would reject clients one version behind. Bump it only when the config
+  sync format changes.
 
 ## Added
 

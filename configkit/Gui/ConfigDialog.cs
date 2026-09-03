@@ -270,6 +270,11 @@ public class ConfigDialog : GuiDialog
         if (setting.ClientSide) return false;
         if (capi.IsSinglePlayer) return false;
 
+        // Only a server that actually runs ConfigKit owns these. Joining one that does not,
+        // a client keeps managing its own configs locally - so locking them would leave the
+        // player unable to edit settings nobody else is managing.
+        if (!capi.ModLoader.GetModSystem<ConfigKitModSystem>().ConfigsReceivedFromServer) return false;
+
         return capi.World?.Player?.HasPrivilege(Privilege.controlserver) != true;
     }
 

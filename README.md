@@ -25,9 +25,10 @@ pause menu.
   of them manages your configs.
 - **You can join a server that doesn't have it**, and you keep your own settings screen
   for client-side mods.
-- **A server running it does not turn anyone away.** A player without ConfigKit still
-  receives the server's patched world; they just get no settings screen, and any mod that
-  reads its config on the client shows that player local defaults.
+- **A server running it needs its players to have it.** Anyone without ConfigKit is turned
+  away on the connect screen and offered the download, the same as any other server-side
+  mod. This is not optional: a client without it would otherwise crash on join, because the
+  server sends config data it has nothing to receive with.
 
 ## For mod authors
 
