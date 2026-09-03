@@ -80,6 +80,10 @@ solved a real problem for hundreds of mods and its file format is the reason Con
 can read existing mods without asking anyone to change anything. Each derived file says
 so in its header.
 
+What was rebuilt, and the bugs fixed along the way — including which of them are still
+present upstream — is listed in
+**[docs/CHANGES-FROM-CONFIGLIB.md](docs/CHANGES-FROM-CONFIGLIB.md)**.
+
 This fork exists because, for a period, configlib's published builds contained a class
 that appeared in no commit of its public source, which fingerprinted other loaded
 assemblies and degraded or disconnected multiplayer clients after a randomised delay.

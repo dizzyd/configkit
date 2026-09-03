@@ -113,8 +113,9 @@ api.ModLoader.GetModSystem<ConfigKitModSystem>()
     .RegisterManagedConfig("mymod", myConfig);
 ```
 
-ConfigKit writes `ModConfig/mymod.json`, draws the settings screen, and assigns edited
-values straight back onto your object.
+ConfigKit writes `ModConfig/mymod.json`, draws the settings screen, and assigns values
+straight onto your object — both what it reads from the file at startup and anything the
+player edits afterwards.
 
 This is usually **less** code than you had. A screen with forty sliders becomes forty
 `[Range]` attributes.
@@ -127,11 +128,24 @@ isn't installed.
 
 | Attribute | Effect |
 |---|---|
-| `[Description("…")]` | Label and tooltip in the settings screen |
+| `[Description("…")]` | Tooltip in the settings screen |
 | `[Range(min, max)]` | Slider instead of a text box |
 | `[DefaultValue(x)]` | Value used by "restore defaults" |
 | `[Category("…")]` | Groups settings under a heading |
 | `[AllowedValues(…)]` | Dropdown of fixed choices |
+
+The label comes from the field name, tidied up — `SearchRadius` shows as "Search radius" —
+unless your mod ships a translation for `<yourmod>:setting-SearchRadius`.
+
+### Field types
+
+`bool`, `string`, `int`, `float`, `double`, `long` and enums all work. An enum becomes a
+dropdown of its member names.
+
+> Under configlib, a `double`, a `long`, an enum, or a `[DefaultValue(3)]` on a `float`
+> field throws while reading your defaults and takes the **whole** registration down with
+> it — which is why some mods carry a comment about using `float` rather than `double`.
+> That is fixed here; you can drop the workaround.
 
 ---
 
@@ -143,7 +157,18 @@ isn't installed.
   and logs why, so nothing breaks — but only one of them manages configs.
 - **Multiplayer needs it on both sides.** A server running ConfigKit needs its clients to
   have ConfigKit, the same as configlib.
+- **Server settings are read-only for ordinary players.** On a multiplayer client, a
+  setting that is not `clientSide` is shown but not editable without the `controlserver`
+  privilege — an edit would never be sent or saved, so offering it would only mislead.
+  Mark anything a player should own with `"clientSide": true`.
 - **No vsimgui dependency.** You can drop it if it was only there for your config screen.
+
+## If something behaves differently
+
+ConfigKit fixes a number of bugs that are still present upstream — including two that stop
+managed configs working properly on a real multiplayer server. If your mod behaved oddly
+under configlib and behaves differently here, [what changed](CHANGES-FROM-CONFIGLIB.md)
+lists them.
 
 ## Getting help
 
