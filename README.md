@@ -23,8 +23,11 @@ pause menu.
 - **Don't install ConfigKit and configlib together.** If ConfigKit sees configlib or
   autoconfiglib it stands down and says so in the log, so nothing breaks, but only one
   of them manages your configs.
-- On a server, both sides need it: a client without ConfigKit simply gets no settings
-  screen.
+- **You can join a server that doesn't have it**, and you keep your own settings screen
+  for client-side mods.
+- **A server running it does not turn anyone away.** A player without ConfigKit still
+  receives the server's patched world; they just get no settings screen, and any mod that
+  reads its config on the client shows that player local defaults.
 
 ## For mod authors
 

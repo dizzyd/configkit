@@ -16,6 +16,28 @@ marked **ours** was introduced by this project, mostly by the GUI rewrite.
 | **Dependency packaging** | No ILRepack. YamlDotNet ships as its own unmodified file, resolved from NuGet at build time rather than checked in as a binary. |
 | **Licence** | MIT, rather than CC0. |
 
+## Deliberate differences
+
+**`requiredOnClient: false`, `requiredOnServer: false`.** Both default to `true` in the
+game's own `ModInfo`, and configlib sets `true` / `false`. Ours are set the way they are on
+purpose, so please don't "correct" them back:
+
+- `requiredOnServer: false` keeps ConfigKit enabled on a client whose server does not have
+  it. With `true`, the client disables the mod (`SystemModHandler` puts every universal
+  `requiredOnServer` mod the server lacks into the disabled list), so a player who installs
+  ConfigKit to configure their own client-side mods would lose it the moment they joined a
+  server without it.
+- `requiredOnClient: false` lets players join a ConfigKit server without having it. They
+  still get the server's patched world, because the server sends its assets to every client
+  regardless. What they lose is the settings screen, and correct values in any mod that
+  reads its config on the client.
+
+The alternative, `requiredOnClient: true`, buys a stronger guarantee at a real price: the
+check matches on `ModID@NetworkVersion`, and `networkVersion` defaults to the mod version,
+so a 1.0.1 server would reject 1.0.0 clients. Version lockstep on a config library is the
+friction that makes configlib servers awkward to join. If this is ever flipped, it needs an
+explicit, rarely-bumped `networkVersion` alongside it.
+
 ## Added
 
 - **39 in-game tests** across three configurations: singleplayer, two-process
