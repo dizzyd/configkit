@@ -13,7 +13,12 @@ bash scripts/vstk shot -o shot.png
 The mod shown is whichever comes first alphabetically by display name; drop that mod
 from the mods directory to photograph the next one.
 
+A slider shows its value to the right of the bar. Fornax is the useful one to check after
+a GUI change: it mixes sliders, floats and rangeless number fields, and has more settings
+than fit, so it exercises both the scrolling clip and the readouts.
+
 | File | Shows |
 |---|---|
 | `settings-betterhandbook.png` | Boolean settings with headings, and the scrollbar |
-| `settings-betterruins.png` | Sliders with ranges, across grouped sections |
+| `settings-betterruins.png` | Sliders with their values, across grouped sections |
+| `settings-fornax.png` | Float values beside sliders, and settings with no range as number fields |
