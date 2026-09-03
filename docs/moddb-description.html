@@ -6,8 +6,8 @@ plain <code>ModConfig/&lt;mod&gt;.yaml</code> you can edit by hand, so <strong>a
 needs no changes at all</strong>, and no dependency on this library either. If ConfigKit
 isn't installed, a mod simply falls back to the default values in its own assets.</p>
 
-<p><em>1.0.0. 39 in-game tests across singleplayer, real two-process multiplayer, and a
-run alongside another config mod. Verified against a 95-mod pack: every asset it patches
+<p><em>Tested in-game across singleplayer, real two-process multiplayer, and a run
+alongside another config mod. Verified against a 95-mod pack: every asset it patches
 resolves identically to configlib's output.</em></p>
 
 <h3>For players</h3>
@@ -58,7 +58,7 @@ Settings, patches, JSON paths and expressions, for a mod with no C# at all.</p>
 <p>Every release is built by GitHub Actions and carries Sigstore-signed provenance tying the zip
 to the commit that produced it:</p>
 
-<pre>gh attestation verify configkit_1.0.0.zip --repo dizzyd/configkit</pre>
+<pre>gh attestation verify configkit_&lt;version&gt;.zip --repo dizzyd/configkit</pre>
 
 <p>The build also refuses to package anything questionable: it asserts that
 <code>ConfigKit.dll</code> declares only its own types (dependencies ship as separate files and
