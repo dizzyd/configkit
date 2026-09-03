@@ -52,6 +52,9 @@ marked **ours** was introduced by this project, mostly by the GUI rewrite.
   fighting over one config file.
 - **Read-only server settings** for players without `controlserver`, and labels
   humanised from field names when a mod ships no translation.
+- **A value beside every slider**, showing the setting's own number rather than the
+  slider's: sliders are integer-only, so a float rides at 100x and vanilla's in-track text
+  would read 250 for a value of 2.5.
 - A colour swatch beside the hex field, panels sized to their content, and
   `ConfigsReceivedFromServer` so a mod can tell synced values from local defaults.
 
@@ -148,6 +151,21 @@ could drag a server slider and then run on a value the server never agreed to.
 **A client whose server does not run ConfigKit had no settings window** (*inherited*).
 It was built only from the server's config registry, so the hotkey and the pause-menu
 button did nothing while the client's own configs sat loaded and editable.
+
+**Rows scrolled out of view were drawn over the buttons and the hotbar** (*ours*).
+`GuiElementContainer` renders each child through its own `RenderInteractiveElements`, and
+several stock elements ignore `InsideClipBounds` and paint at their own bounds. Only the
+container's static texture was scissored, so a row below the fold lost its frame but kept
+its label and value. The same bounds drive mouse handling, so a switch invisible under a
+button could still be clicked.
+
+**Every slider below a rangeless number setting vanished** (*engine*).
+`GuiElementTextInput` overwrites the GL scissor rect with its own box to trim its text and
+ends on `GlScissorFlag(false)` instead of restoring what it was handed;
+`GuiElementHoverText` switches the flag back on without setting a rect. A settings row is a
+label, a tooltip and a control, so after the first number input every following slider was
+scissored into a stale text-box-sized rect. ConfigKit re-establishes the clip around each
+child rather than trusting the previous one to have left it alone.
 
 **A `values` list of numbers rendered as blank rows** (*ours*).
 `JsonObject.AsString` returns the default for any non-string token, so
