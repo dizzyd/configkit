@@ -38,7 +38,7 @@ public class ConfigDialog : GuiDialog
     private const double ControlWidth = 250;
     private const double ValueWidth = 54;
     private const double ResetWidth = 56;
-    private const double ResetGap = 8;
+    private const double ResetGap = 14;
 
     private readonly Dictionary<string, Config> _configs;
     private readonly List<string> _domains;
