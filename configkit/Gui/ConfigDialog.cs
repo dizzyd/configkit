@@ -144,8 +144,11 @@ public class ConfigDialog : GuiDialog
                     dropdownBounds,
                     "domain")
                 .AddInset(insetBounds, 3)
-                .BeginClip(clipBounds)
-                    .AddContainer(_contentBounds, "rows");
+                .BeginClip(clipBounds);
+
+        // A ClippedContainer rather than AddContainer: the stock one lets rows scrolled out
+        // of view draw and be clicked. See ClippedContainer for what that looked like.
+        composer.AddInteractiveElement(new ClippedContainer(capi, _contentBounds), "rows");
 
         // Rows are built as elements and handed to the container, which draws them itself
         // inside the clip. Adding them straight to the composer bakes their frames and text

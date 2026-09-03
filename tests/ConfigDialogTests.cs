@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using ConfigKit;
 using ConfigKit.Gui;
 using Newtonsoft.Json.Linq;
+using Vintagestory.API.Client;
 using Vintagestory.API.Datastructures;
 using VsTestkit.Testing;
 using static VsTestkit.Testing.Vs;
@@ -145,6 +146,62 @@ public class ConfigDialogTests
         Assert.Equal(12, config.GetSetting("radius")!.Value.AsInt());
         Assert.Equal(true, config.GetSetting("enabled")!.Value.AsBool());
         Assert.Equal("balanced", config.GetSetting("mode")!.Value.AsString(""));
+
+        dialog.TryClose();
+    }
+
+    /// <summary>
+    /// More settings than fit, with a rangeless number setting above the sliders. That order
+    /// matters: a number input leaves the GL scissor pointing at its own box and switched
+    /// off, and the next tooltip switches it back on, so every slider below one used to be
+    /// clipped into nothing.
+    /// </summary>
+    private static string TallDefinition()
+    {
+        System.Text.StringBuilder sb = new();
+        sb.Append(@"{ ""version"": 1, ""settings"": [");
+        sb.Append(@"{ ""type"": ""integer"", ""code"": ""plain"", ""nameInGui"": ""Rangeless number"", ""default"": 450 },");
+        for (int i = 0; i < 30; i++)
+        {
+            sb.Append(@"{ ""type"": ""integer"", ""code"": ""s" + i + @""", ""nameInGui"": ""Setting " + i
+                + @""", ""comment"": ""Tooltip " + i + @""", ""default"": 5, ""range"": { ""min"": 0, ""max"": 10 } },");
+        }
+        sb.Length--;
+        sb.Append("] }");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Rows scrolled out of view must not be drawn. The stock GuiElementContainer draws every
+    /// child wherever its bounds say, and several stock elements ignore InsideClipBounds, so
+    /// labels and values from below the fold landed on top of the buttons and the hotbar.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task RowsBelowTheFoldAreNotDrawn()
+    {
+        await OnClient();
+
+        JsonObject json = new(JToken.Parse(TallDefinition()));
+        Config config = new(Capi, "tall", "Tall Mod", json);
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { ["tall"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(10);
+
+        ClippedContainer container = (ClippedContainer)dialog.SingleComposer.GetContainer("rows");
+        int total = container.Elements.Count;
+        var visible = container.VisibleElements.ToList();
+
+        Assert.True(total > visible.Count, $"nothing was culled: {total} elements all drawn");
+        Assert.True(visible.Count > 0, "everything was culled");
+
+        ElementBounds clip = container.InsideClipBounds!;
+        double bottom = clip.renderY + clip.OuterHeight;
+        foreach (GuiElement element in visible)
+        {
+            Assert.True(element.Bounds.renderY <= bottom,
+                $"{element.GetType().Name} at {element.Bounds.renderY} draws past the clip at {bottom}");
+        }
 
         dialog.TryClose();
     }
