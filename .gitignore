@@ -7,3 +7,6 @@ Releases/
 
 # Written by the csproj on first build; points at a local game install.
 configkit/Properties/localSettings.props
+
+# Screenshots are generated, not authored - see docs/screenshots/README.md.
+docs/screenshots/*.png

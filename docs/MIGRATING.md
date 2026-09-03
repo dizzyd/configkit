@@ -31,19 +31,17 @@ Nothing below applies to you. You're done.
 
 ## Case 2: you check whether configlib is installed
 
-Accept either library:
+Change the mod id:
 
 ```csharp
 // before
 bool configAvailable = api.ModLoader.GetMod("configlib") != null;
 
 // after
-bool configAvailable = api.ModLoader.GetMod("configkit") != null
-                    || api.ModLoader.GetMod("configlib") != null;
+bool configAvailable = api.ModLoader.GetMod("configkit") != null;
 ```
 
-That's the whole change. You still need no reference to either library, and your mod
-keeps working for players who have configlib.
+That's the whole change. You still need no reference to the library at all.
 
 ---
 
@@ -154,7 +152,8 @@ dropdown of its member names.
 - **Settings carry over.** ConfigKit writes the same `ModConfig/<yourmod>.yaml` files, so
   players keep their existing values.
 - **Don't ship both.** If configlib or autoconfiglib is installed, ConfigKit stands down
-  and logs why, so nothing breaks, but only one of them manages configs.
+  and logs why, so nothing breaks, but only one of them manages configs. Migrate to one or
+  the other rather than trying to support both.
 - **Multiplayer needs it on both sides.** A server running ConfigKit needs its clients to
   have ConfigKit, the same as configlib.
 - **Server settings are read-only for ordinary players.** On a multiplayer client, a

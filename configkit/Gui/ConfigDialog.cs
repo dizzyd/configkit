@@ -44,6 +44,10 @@ public class ConfigDialog : GuiDialog
     /// unique per compose rather than per setting.
     private readonly Dictionary<string, ConfigSetting> _settingsByKey = new();
 
+    /// The control built for each setting, kept because container children are not
+    /// reachable through the composer by key.
+    private readonly Dictionary<string, GuiElement> _widgets = new();
+
     private ElementBounds? _contentBounds;
     private double _contentHeight;
 
@@ -125,13 +129,17 @@ public class ConfigDialog : GuiDialog
                     "domain")
                 .AddInset(insetBounds, 3)
                 .BeginClip(clipBounds)
-                    .BeginChildElements(_contentBounds);
+                    .AddContainer(_contentBounds, "rows");
 
-        LayoutRows(composer, _configs[_domain]);
+        // Rows are built as elements and handed to the container, which draws them itself
+        // inside the clip. Adding them straight to the composer bakes their frames and text
+        // into the dialog's own surface, where a render-time clip never reaches them: with
+        // more settings than fit, labels and empty switch frames drew over the buttons and
+        // the hotbar while only the parts drawn per frame were correctly hidden.
+        LayoutRows(composer.GetContainer("rows"), _configs[_domain]);
         _contentBounds.fixedHeight = _contentHeight;
 
         composer
-                    .EndChildElements()
                 .EndClip();
 
         // A scrollbar over content that already fits tells the player there is more to see.
@@ -171,59 +179,59 @@ public class ConfigDialog : GuiDialog
     }
 
     /// <summary>
-    /// Walks the config's blocks in order, laying out one row per visible setting.
-    /// A null composer measures without emitting, so the panel can be sized to its content
-    /// before anything is added to it - one method, so the two passes cannot drift apart.
+    /// Walks the config's blocks in order, building one row per visible setting.
+    /// A null container measures without building, so the panel can be sized to its
+    /// content before anything is added: one method, so the two passes cannot drift.
     /// </summary>
-    private double LayoutRows(GuiComposer? composer, Config config)
+    private double LayoutRows(GuiElementContainer? container, Config config)
     {
         double y = 4;
         int index = 0;
+
+        if (container != null) _widgets.Clear();
 
         foreach ((float _, IConfigBlock block) in config.ConfigBlocks)
         {
             if (block is IFormattingBlock formatting)
             {
-                y = AddFormattingBlock(composer, formatting, y, index++);
+                y = AddFormattingBlock(container, formatting, y);
                 continue;
             }
 
             if (block is not ConfigSetting setting || setting.Hide) continue;
 
             string key = $"setting-{index++}";
-            if (composer == null)
+            if (container == null)
             {
                 y += RowHeight + RowGap;
                 continue;
             }
 
-            if (!IsServerControlled(setting)) _settingsByKey[key] = setting;
+            bool locked = IsServerControlled(setting);
+            if (!locked) _settingsByKey[key] = setting;
 
             ElementBounds labelBounds = ElementBounds.Fixed(0, y + 4, LabelWidth, RowHeight);
             ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
 
-            bool locked = IsServerControlled(setting);
-
-            composer.AddDynamicText(
+            container.Add(new GuiElementDynamicText(capi,
                 locked ? LabelFor(setting) + " (server)" : LabelFor(setting),
                 locked ? CairoFont.WhiteDetailText().WithColor(GuiStyle.ColorParchment) : CairoFont.WhiteDetailText(),
-                labelBounds, key + "-label");
+                labelBounds));
 
             if (!string.IsNullOrEmpty(setting.Comment))
             {
-                composer.AddHoverText(setting.Comment, CairoFont.WhiteDetailText(), 320, labelBounds.FlatCopy());
+                container.Add(new GuiElementHoverText(capi, setting.Comment,
+                    CairoFont.WhiteDetailText(), 320, labelBounds.FlatCopy()));
             }
 
             if (locked)
             {
-                // Editable here but never sent or saved, so the client would simply run on a
-                // value the server never agreed to. Show it, do not offer to change it.
-                composer.AddDynamicText(ValueText(setting), CairoFont.WhiteDetailText(),
-                    controlBounds, key + "-value");
+                container.Add(new GuiElementDynamicText(capi, ValueText(setting),
+                    CairoFont.WhiteDetailText(), controlBounds));
             }
             else
             {
-                AddControl(composer, setting, controlBounds, key);
+                AddControl(container, setting, controlBounds, key);
             }
 
             y += RowHeight + RowGap;
@@ -232,19 +240,21 @@ public class ConfigDialog : GuiDialog
         return y;
     }
 
-    private static double AddFormattingBlock(GuiComposer? composer, IFormattingBlock block, double y, int index)
+    private double AddFormattingBlock(GuiElementContainer? container, IFormattingBlock block, double y)
     {
         if (block.Title != null)
         {
-            composer?.AddDynamicText(block.Title, CairoFont.WhiteSmallText().WithWeight(Cairo.FontWeight.Bold),
-                ElementBounds.Fixed(0, y + 10, DialogWidth - 40, 26), $"heading-{index}");
+            container?.Add(new GuiElementDynamicText(capi,
+                block.Title, CairoFont.WhiteSmallText().WithWeight(Cairo.FontWeight.Bold),
+                ElementBounds.Fixed(0, y + 10, DialogWidth - 40, 26)));
             y += 40;
         }
 
         if (block.Text != null)
         {
-            composer?.AddDynamicText(block.Text, CairoFont.WhiteDetailText(),
-                ElementBounds.Fixed(0, y, DialogWidth - 40, 24), $"headtext-{index}");
+            container?.Add(new GuiElementDynamicText(capi,
+                block.Text, CairoFont.WhiteDetailText(),
+                ElementBounds.Fixed(0, y, DialogWidth - 40, 24)));
             y += 28;
         }
 
@@ -265,6 +275,11 @@ public class ConfigDialog : GuiDialog
 
     private static string ValueText(ConfigSetting setting)
         => setting.MappingKey ?? setting.Value.Token?.ToString() ?? "";
+
+    private static string NumberText(ConfigSetting setting)
+        => setting.SettingType == ConfigSettingType.Float
+            ? setting.Value.AsFloat().ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : setting.Value.AsInt().ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static string LabelFor(ConfigSetting setting)
     {
@@ -296,19 +311,17 @@ public class ConfigDialog : GuiDialog
 
     // ------------------------------------------------------------------ controls
 
-    private void AddControl(GuiComposer composer, ConfigSetting setting, ElementBounds bounds, string key)
+    private void AddControl(GuiElementContainer container, ConfigSetting setting, ElementBounds bounds, string key)
     {
         Validation? validation = setting.Validation;
 
-        // A fixed set of allowed values, or a named mapping, is a dropdown whatever the
-        // underlying type is.
         if (validation?.Mapping != null)
         {
             string[] keys = validation.Mapping.Keys.ToArray();
             int selected = Math.Max(0, Array.IndexOf(keys, setting.MappingKey ?? ""));
-            composer.AddDropDown(keys, keys, selected,
-                (code, selectedNow) => { if (selectedNow) setting.MappingKey = code; },
-                bounds, key);
+            Remember(key, container, new GuiElementDropDown(capi, keys, keys, selected,
+                (code, on) => { if (on) setting.MappingKey = code; },
+                bounds, CairoFont.WhiteDetailText(), false));
             return;
         }
 
@@ -319,42 +332,50 @@ public class ConfigDialog : GuiDialog
             // blank rows and wrote an empty string back into the setting.
             string[] values = validation.Values.Select(TokenText).ToArray();
             int selected = Math.Max(0, Array.IndexOf(values, TokenText(setting.Value)));
-            composer.AddDropDown(values, values, selected,
-                (code, selectedNow) => { if (selectedNow) SetFromText(setting, code); },
-                bounds, key);
+            Remember(key, container, new GuiElementDropDown(capi, values, values, selected,
+                (code, on) => { if (on) SetFromText(setting, code); },
+                bounds, CairoFont.WhiteDetailText(), false));
             return;
         }
 
         switch (setting.SettingType)
         {
             case ConfigSettingType.Boolean:
-                composer.AddSwitch(on => setting.Value = FromBool(on), bounds, key);
+                Remember(key, container, new GuiElementSwitch(capi, on => setting.Value = FromBool(on), bounds));
                 break;
 
             case ConfigSettingType.Integer when HasRange(validation):
             case ConfigSettingType.Float when HasRange(validation):
-                composer.AddSlider(value => OnSlider(setting, value), bounds, key);
+                Remember(key, container, new GuiElementSlider(capi, value => OnSlider(setting, value), bounds));
                 break;
 
             case ConfigSettingType.Integer:
             case ConfigSettingType.Float:
-                composer.AddNumberInput(bounds, text => OnNumberTyped(setting, text), CairoFont.WhiteDetailText(), key);
+                Remember(key, container, new GuiElementNumberInput(capi, bounds,
+                    text => OnNumberTyped(setting, text), CairoFont.WhiteDetailText()));
                 break;
 
             case ConfigSettingType.Other:
-                composer.AddTextArea(bounds.WithFixedHeight(RowHeight * 2), text => OnJsonTyped(setting, text),
-                    CairoFont.WhiteDetailText(), key);
+                Remember(key, container, new GuiElementTextArea(capi, bounds.WithFixedHeight(RowHeight * 2),
+                    text => OnJsonTyped(setting, text), CairoFont.WhiteDetailText()));
                 break;
 
             case ConfigSettingType.Color:
-                AddColorControl(composer, setting, bounds, key);
+                AddColorControl(container, setting, bounds, key);
                 break;
 
             case ConfigSettingType.String:
             default:
-                composer.AddTextInput(bounds, text => setting.Value = FromString(text), CairoFont.WhiteDetailText(), key);
+                Remember(key, container, new GuiElementTextInput(capi, bounds,
+                    text => setting.Value = FromString(text), CairoFont.WhiteDetailText()));
                 break;
         }
+    }
+
+    private void Remember(string key, GuiElementContainer container, GuiElement element)
+    {
+        _widgets[key] = element;
+        container.Add(element);
     }
 
     /// <summary>
@@ -362,27 +383,20 @@ public class ConfigDialog : GuiDialog
     /// free-form one, so this is a hex field with a live swatch beside it: exact values
     /// stay typeable and pasteable, and a mistyped one is visible rather than silent.
     /// </summary>
-    private void AddColorControl(GuiComposer composer, ConfigSetting setting, ElementBounds bounds, string key)
+    private void AddColorControl(GuiElementContainer container, ConfigSetting setting, ElementBounds bounds, string key)
     {
         double swatchSize = bounds.fixedHeight;
         ElementBounds fieldBounds = bounds.FlatCopy().WithFixedWidth(bounds.fixedWidth - swatchSize - 8);
         ElementBounds swatchBounds = ElementBounds.Fixed(
             bounds.fixedX + bounds.fixedWidth - swatchSize, bounds.fixedY, swatchSize, swatchSize);
 
-        composer.AddTextInput(fieldBounds, text => OnColorTyped(setting, text, key), CairoFont.WhiteDetailText(), key);
-        composer.AddDynamicCustomDraw(swatchBounds, (ctx, surface, currentBounds) =>
-            DrawSwatch(ctx, currentBounds, setting.Value.AsString("#000000")), SwatchKey(key));
-    }
+        GuiElementCustomDraw swatch = new(capi, swatchBounds,
+            (ctx, surface, currentBounds) => DrawSwatch(ctx, currentBounds, setting.Value.AsString("#000000")));
 
-    private static string SwatchKey(string key) => key + "-swatch";
+        Remember(key, container, new GuiElementTextInput(capi, fieldBounds,
+            text => { setting.Value = FromString(text); swatch.Redraw(); }, CairoFont.WhiteDetailText()));
 
-    private void OnColorTyped(ConfigSetting setting, string text, string key)
-    {
-        setting.Value = FromString(text);
-
-        // Repaint the swatch on every keystroke; a half-typed colour simply does not parse
-        // and leaves the swatch showing its "no colour" state.
-        SingleComposer?.GetCustomDraw(SwatchKey(key))?.Redraw();
+        container.Add(swatch);
     }
 
     private static void DrawSwatch(Cairo.Context ctx, ElementBounds bounds, string hex)
@@ -453,56 +467,50 @@ public class ConfigDialog : GuiDialog
     private static bool HasRange(Validation? validation)
         => validation?.Minimum != null && validation?.Maximum != null;
 
-    /// <summary>Pushes current values into the widgets once they exist.</summary>
+    /// <summary>
+    /// Pushes current values into the widgets. They are held by reference rather than
+    /// looked up on the composer, because rows now live inside a container and are not
+    /// registered as named composer elements.
+    /// </summary>
     private void LoadControlValues()
     {
         foreach ((string key, ConfigSetting setting) in _settingsByKey)
         {
-            Validation? validation = setting.Validation;
+            if (!_widgets.TryGetValue(key, out GuiElement? widget)) continue;
 
+            Validation? validation = setting.Validation;
             if (validation?.Mapping != null || validation?.Values != null) continue;
 
-            switch (setting.SettingType)
+            switch (widget)
             {
-                case ConfigSettingType.Boolean:
-                    SingleComposer.GetSwitch(key).On = setting.Value.AsBool();
+                case GuiElementSwitch toggle:
+                    toggle.On = setting.Value.AsBool();
                     break;
 
-                case ConfigSettingType.Integer when HasRange(validation):
-                case ConfigSettingType.Float when HasRange(validation):
-                    SingleComposer.GetSlider(key).SetValues(
+                case GuiElementSlider slider:
+                    slider.SetValues(
                         ToSliderInt(setting, setting.Value),
                         ToSliderInt(setting, validation!.Minimum!),
                         ToSliderInt(setting, validation.Maximum!),
                         Math.Max(1, validation.Step == null ? 1 : ToSliderInt(setting, validation.Step)));
                     break;
 
-                case ConfigSettingType.Other:
-                    SingleComposer.GetTextArea(key).SetValue(setting.Value.ToString());
+                case GuiElementTextArea area:
+                    area.SetValue(setting.Value.ToString());
                     break;
 
-                case ConfigSettingType.Integer:
-                case ConfigSettingType.Float:
-                    SingleComposer.GetTextInput(key).SetValue(NumberText(setting));
+                case GuiElementNumberInput number:
+                    number.SetValue(NumberText(setting));
                     break;
 
-                case ConfigSettingType.Color:
-                    SingleComposer.GetTextInput(key).SetValue(setting.Value.AsString(""));
-                    SingleComposer.GetCustomDraw(SwatchKey(key))?.Redraw();
-                    break;
-
-                case ConfigSettingType.String:
-                default:
-                    SingleComposer.GetTextInput(key).SetValue(setting.Value.AsString(""));
+                case GuiElementTextInput text:
+                    text.SetValue(setting.SettingType == ConfigSettingType.Color
+                        ? setting.Value.AsString("")
+                        : setting.Value.AsString(""));
                     break;
             }
         }
     }
-
-    private static string NumberText(ConfigSetting setting)
-        => setting.SettingType == ConfigSettingType.Float
-            ? setting.Value.AsFloat().ToString(System.Globalization.CultureInfo.InvariantCulture)
-            : setting.Value.AsInt().ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     // Sliders are integer-only, so a float setting is carried at 100x and divided back.
     private const int FloatScale = 100;
