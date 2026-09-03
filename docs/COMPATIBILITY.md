@@ -14,7 +14,7 @@ experience survives.
 
 | tier | mods | what it takes |
 |---|---:|---|
-| [A](#a--nothing-to-change) | 152 | nothing |
+| [A](#a--nothing-to-change) | 152 | nothing — bar 6 with a hard dependency |
 | [B](#b--one-or-two-strings) | 25 | one or two strings |
 | [C](#c--swap-the-reference-and-rebuild) | 21 | swap the reference, rebuild |
 | [D](#d--replace-the-imgui-screen) | 24 | replace the ImGui screen |
@@ -30,8 +30,43 @@ alphabetically within each tier.
 that touches the library.
 
 ConfigKit reads the same patch file, applies the same JSON-path writes to the same assets, and
-writes the same `ModConfig/<domain>.yaml`. Players keep their existing settings. No author
-action, no new dependency, no rebuild.
+writes the same `ModConfig/<domain>.yaml`. Players keep their existing settings. No code to
+change, nothing to rebuild.
+
+### Except 6 of them, which name configlib as a hard dependency
+
+These declare `"configlib"` in `modinfo.json`. That is a **load-time** requirement resolved
+against the mod id, so the game refuses the mod outright when no mod called `configlib` is
+installed — before any of ConfigKit's patching gets a chance to run. Having no C# to port does
+not help them; the mod simply does not load.
+
+| mod | mod id | its other dependencies |
+|---|---|---|
+| [Combat Overhaul Armor Tweak](https://mods.vintagestory.at/show/mod/8708) | `zzcoarmorpenaltypatch` | `combatoverhaulfork` |
+| [Heatproof Bricks](https://mods.vintagestory.at/heatproofbricks) | `heatproofbricks` | `game` |
+| [Low Light Spawns](https://mods.vintagestory.at/lowlightspawns) | `lowlightspawns` | `game` |
+| [No Waste Bloomery](https://mods.vintagestory.at/show/mod/6265) | `nowastebloomery` | `game` |
+| [Rustbound Magic Easy Mode](https://mods.vintagestory.at/show/mod/3633) | `rustboundmagiceasy` | `rustboundmagic` |
+| [Vintage Rift - Client](https://mods.vintagestory.at/vintageriftclient) | `vintagerift` | `jsonpatcheslib` |
+
+The fix is one word, and it is the author's to make:
+
+```json
+// before
+"dependencies": { "game": "", "configlib": "" }
+
+// after - either
+"dependencies": { "game": "", "configkit": "" }
+// or, since the assets load fine either way and the settings are a bonus
+"dependencies": { "game": "" }
+```
+
+Dropping the line entirely is usually the better choice: a content mod's patches are applied by
+whichever config library is present, and the mod still works with none installed — it just uses
+the defaults its own assets ship. A hard dependency on a config library buys nothing and costs
+the mod every player who does not have that exact one.
+
+Everything in this tier, including these 6, is listed below.
 
 | mod | mod id |
 |---|---|
@@ -387,3 +422,6 @@ porting it.
   fetch that failed — so 1,993 of the 2,000 were actually read.
 - Tier A means no configlib coupling was found in any shipped assembly. A mod that reaches the
   library through a dependency of its own would not show up.
+- `modinfo.json` is read case-insensitively, because the game accepts `"Dependencies"` as well as
+  `"dependencies"`. A tolerant reader recovered 247 files that a case-sensitive one had returned
+  empty, and those are exactly where the tier A hard dependencies were hiding.
