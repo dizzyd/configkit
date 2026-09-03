@@ -41,8 +41,13 @@ less code than you had.</li>
 
 <p>A settings class needs only stock .NET attributes (<code>[Description]</code>,
 <code>[Range]</code>, <code>[Category]</code>), so it keeps no reference to ConfigKit and still
-compiles and runs without it. Full guide:
-<a href="https://github.com/dizzyd/configkit/blob/main/docs/MIGRATING.md">docs/MIGRATING.md</a>.</p>
+compiles and runs without it.</p>
+
+<p><strong>Guides:</strong>
+<a href="https://github.com/dizzyd/configkit/blob/main/docs/MIGRATING.md">migrating from configlib</a>
+&middot;
+<a href="https://github.com/dizzyd/configkit/blob/main/docs/CONFIG-FORMAT.md">the config file format</a>
+— settings, patches, JSON paths and expressions, for a mod with no C# at all.</p>
 
 <h3>Verifying what you downloaded</h3>
 
@@ -63,7 +68,10 @@ source says — not that the behaviour is correct. The source is short; read it.
 under CC0. The config model, the patch format, the expression syntax and the server-sync design
 are his work, and they are good work — configlib solved a real problem for hundreds of mods,
 and its file format is the reason ConfigKit can read existing mods without asking anyone to
-change anything.</p>
+change anything. What was rebuilt, and the bugs fixed along the way — including which are
+still present upstream and which this project introduced itself — is listed in
+<a href="https://github.com/dizzyd/configkit/blob/main/docs/CHANGES-FROM-CONFIGLIB.md">what
+changed from configlib</a>.</p>
 
 <p>This fork exists because, for a period, configlib's published builds contained a class that
 appeared in no commit of its public source, which fingerprinted other loaded assemblies and

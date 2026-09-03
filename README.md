@@ -41,6 +41,10 @@ A settings class needs only stock .NET attributes — `[Description]`, `[Range]`
 `[Category]` — so it keeps no reference to ConfigKit and still compiles and runs
 without it.
 
+Writing your first config with no C# at all? **[docs/CONFIG-FORMAT.md](docs/CONFIG-FORMAT.md)**
+is the reference for `configlib-patches.json`: settings, patches, JSON paths and
+expressions.
+
 ---
 
 ## Verifying a build
