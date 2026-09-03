@@ -1,0 +1,82 @@
+ConfigKit gives Vintage Story mods an in-game settings screen, drawn with
+the game's own interface. No Dear ImGui, and nothing extra to install alongside it.
+
+It reads the same configlib-patches.json files mods already ship and writes a
+plain ModConfig/<mod>.yaml you can edit by hand, so a content mod
+needs no changes at all — and no dependency on this library either. If ConfigKit
+isn't installed, a mod simply falls back to the default values in its own assets.
+
+Status: 0.1.0. Early, but tested — 39 in-game tests across singleplayer,
+real two-process multiplayer, and a run alongside another config mod.
+
+FOR PLAYERS
+
+  - Press P, or use the Mod settings button in the pause menu.
+  - Settings the server controls are shown read-only unless you have controlserver.
+  - Edit a file in ModConfig/ while the game is running and it reloads on the spot.
+  - Don't install ConfigKit and Config lib together. If ConfigKit sees Config lib
+or Auto Config lib it stands down and says so in the log, so nothing breaks — but only one of
+them can manage your configs.
+  - On a server, both sides need it. A client without ConfigKit just gets no settings screen.
+
+FOR SERVER ADMINS
+
+Settings can rewrite values inside other mods' JSON assets — block behaviour, recipes, item
+stats — from one config file, without repacking anything. That is often the quickest way to
+retune a pack for a server, and the server's values are synced to every client on join.
+
+FOR MOD AUTHORS
+
+Most mods need no changes. The migration guide covers four cases:
+
+  - Ships a configlib-patches.json and no C#? Nothing to do.
+  - Checks whether a config mod is installed? One line.
+  - Calls into the library? Swap a reference and rebuild.
+  - Draws its own ImGui settings screen? Describe the settings instead — usually
+less code than you had.
+
+A settings class needs only stock .NET attributes ([Description],
+[Range], [Category]), so it keeps no reference to ConfigKit and still
+compiles and runs without it. Full guide:
+docs/MIGRATING.md (https://github.com/dizzyd/configkit/blob/main/docs/MIGRATING.md).
+
+VERIFYING WHAT YOU DOWNLOADED
+
+Every release is built by GitHub Actions and carries Sigstore-signed provenance tying the zip
+to the commit that produced it:
+
+    gh attestation verify configkit_0.1.0.zip --repo dizzyd/configkit
+
+The build also refuses to package anything questionable: it asserts that
+ConfigKit.dll declares only its own types (dependencies ship as separate files and
+are never merged in), that every third-party dll matches its publisher's SHA-256, and that each
+one ships with its licence. That proves provenance — that the binary contains what the
+source says — not that the behaviour is correct. The source is short; read it.
+
+ORIGIN, AND CREDIT
+
+ConfigKit is derived from Config lib by Maltiez, released
+under CC0. The config model, the patch format, the expression syntax and the server-sync design
+are his work, and they are good work — Config lib solved a real problem for hundreds of mods,
+and its file format is the reason ConfigKit can read existing mods without asking anyone to
+change anything.
+
+This fork exists because, for a period, Config lib's published builds contained a class that
+appeared in no commit of its public source, which fingerprinted other loaded assemblies and
+degraded or disconnected multiplayer clients after a randomised delay. Those releases have since
+been withdrawn, and current Config lib builds match their public source — I checked, and say so
+gladly.
+
+None of that is a judgement of the person. But the principle matters more than any one
+incident: players run our code on their machines, and they should be able to see what it
+does. A mod should do what its source says it does, and nothing else. That is the whole
+reason for the verification above — not because this project is more trustworthy, but because
+trust shouldn't have to be the mechanism.
+
+If you use Config lib today and it works for you, that is a perfectly reasonable choice.
+
+LINKS
+
+Source, issues and releases: github.com/dizzyd/configkit (https://github.com/dizzyd/configkit)
+
+Licence: MIT. Third-party notices ship in the zip under licenses/.
