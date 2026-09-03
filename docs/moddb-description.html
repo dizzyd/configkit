@@ -60,8 +60,8 @@ to the commit that produced it:</p>
 <p>The build also refuses to package anything questionable: it asserts that
 <code>ConfigKit.dll</code> declares only its own types (dependencies ship as separate files and
 are never merged in), that every third-party dll matches its publisher's SHA-256, and that each
-one ships with its licence. That proves <em>provenance</em>: that the binary contains what the
-source says, not that the behaviour is correct. The source is short; read it.</p>
+one ships with its licence. What that proves is <em>provenance</em>: the binary contains what
+the source says, not that the behaviour is correct. The source is short; read it.</p>
 
 <h3>Origin, and credit</h3>
 
@@ -77,8 +77,7 @@ changed from configlib</a>.</p>
 <p>This fork exists because, for a period, configlib's published builds contained a class that
 appeared in no commit of its public source, which fingerprinted other loaded assemblies and
 degraded or disconnected multiplayer clients after a randomised delay. Those releases have since
-been withdrawn, and current configlib builds match their public source. I checked, and say so
-gladly.</p>
+been withdrawn, and current configlib builds match their public source.</p>
 
 <p>None of that is a judgement of the person. But the principle matters more than any one
 incident: <strong>players run our code on their machines, and they should be able to see what it

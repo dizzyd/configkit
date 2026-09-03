@@ -70,9 +70,8 @@ asserts that:
    unmodified NuGet 13.7.1 build, resolved at build time rather than checked in.
 3. **Every third-party dll ships with its licence**, in `licenses/`.
 
-Be clear about what that does and doesn't prove: it establishes *provenance*: that the
-binary contains what the source says and nothing merged in from elsewhere. It is not an
-audit of behaviour. Read the source; it's short.
+What that proves is *provenance*: the binary contains what the source says, and nothing
+merged in from elsewhere. It is not an audit of behaviour. Read the source; it's short.
 
 ---
 
@@ -93,7 +92,7 @@ This fork exists because, for a period, configlib's published builds contained a
 that appeared in no commit of its public source, which fingerprinted other loaded
 assemblies and degraded or disconnected multiplayer clients after a randomised delay.
 Those releases have since been withdrawn, and current configlib builds match their
-public source. I checked, and say so gladly.
+public source.
 
 Nothing here is a judgement of the person. But the principle matters more than any one
 incident: **players run our code on their machines, and they should be able to see what

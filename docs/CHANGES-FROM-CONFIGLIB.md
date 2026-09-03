@@ -1,12 +1,10 @@
 # What changed from configlib
 
 ConfigKit is derived from [configlib](https://github.com/maltiez2/vsmod_configlib) (CC0).
-This is the honest diff: what was rebuilt, what was fixed, and which of those bugs are
-still present upstream.
+What was rebuilt, what was fixed, and which of those bugs are still present upstream.
 
-Everything marked **inherited** was verified against configlib's own source, not guessed
-at. Everything marked **ours** was introduced by this project, mostly by the GUI rewrite,
-and is listed for the same reason as the rest.
+Everything marked **inherited** was verified against configlib's own source. Everything
+marked **ours** was introduced by this project, mostly by the GUI rewrite.
 
 ---
 
@@ -151,7 +149,7 @@ reachable on a client joined to a remote server.
 ## Known and unfixed
 
 - A malformed config file leaves that mod with **no settings** rather than falling back to
-  defaults. There is a test documenting the behaviour, not endorsing it.
+  defaults. A test documents the current behaviour.
 - `ServerSideSettingChanged.IsSinglePlayer` is a bool the client chooses and the server
   trusts; a privileged client can suppress the server's persist.
 - Orphan accounting in the static watcher tables is not directly tested across repeated
