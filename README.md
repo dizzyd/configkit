@@ -6,8 +6,9 @@ ConfigKit reads a mod's `configlib-patches.json`, writes a plain `ModConfig/<mod
 you can edit by hand, syncs the server's values to every client, and draws a settings
 screen using the game's own interface. Content mods need no changes at all.
 
-> **Status: 0.1.0.** Early, but tested — 39 in-game tests across singleplayer,
-> two-process multiplayer, and a run with another config mod installed.
+> **1.0.0** — 39 in-game tests across singleplayer, two-process multiplayer, and a run
+> with another config mod installed. Verified against a 95-mod pack: every asset it
+> patches resolves identically to configlib's output.
 
 ---
 
@@ -56,7 +57,7 @@ Every release is built by GitHub Actions and carries Sigstore-signed provenance 
 the zip to the commit and workflow that produced it:
 
 ```bash
-gh attestation verify configkit_0.1.0.zip --repo dizzyd/configkit
+gh attestation verify configkit_1.0.0.zip --repo dizzyd/configkit
 ```
 
 The build itself refuses to package anything questionable. `CakeBuild/Program.cs`

@@ -6,8 +6,9 @@ plain ModConfig/<mod>.yaml you can edit by hand, so a content mod
 needs no changes at all — and no dependency on this library either. If ConfigKit
 isn't installed, a mod simply falls back to the default values in its own assets.
 
-Status: 0.1.0. Early, but tested — 39 in-game tests across singleplayer,
-real two-process multiplayer, and a run alongside another config mod.
+1.0.0 — 39 in-game tests across singleplayer, real two-process multiplayer, and a
+run alongside another config mod. Verified against a 95-mod pack: every asset it patches
+resolves identically to configlib's output.
 
 FOR PLAYERS
 
@@ -50,7 +51,7 @@ VERIFYING WHAT YOU DOWNLOADED
 Every release is built by GitHub Actions and carries Sigstore-signed provenance tying the zip
 to the commit that produced it:
 
-    gh attestation verify configkit_0.1.0.zip --repo dizzyd/configkit
+    gh attestation verify configkit_1.0.0.zip --repo dizzyd/configkit
 
 The build also refuses to package anything questionable: it asserts that
 ConfigKit.dll declares only its own types (dependencies ship as separate files and
