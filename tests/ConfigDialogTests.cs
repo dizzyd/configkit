@@ -106,6 +106,32 @@ public class ConfigDialogTests
         Assert.False(ConfigDialog.TryParseHex(null, out _, out _, out _));
     }
 
+    /// <summary>
+    /// Sliders are integer-only, so a float setting rides at 100x. The readout beside one
+    /// has to show the setting's value rather than the slider's: a speed of 1.5 must read
+    /// "1.5", never "150".
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task SliderReadoutsShowTheSettingsOwnValue()
+    {
+        await OnClient();
+
+        ConfigDialog dialog = OpenDemoDialog();
+        await Frames.Wait(10);
+
+        IReadOnlyDictionary<string, string> texts = dialog.SliderValueTexts;
+
+        Assert.Equal("12", texts["radius"]);
+        Assert.Equal("1.5", texts["speed"]);
+
+        // "limit" has no range, so it is a number field rather than a slider and gets no
+        // readout of its own - the field already shows the number.
+        Assert.False(texts.ContainsKey("limit"), "a rangeless setting should not get a slider readout");
+
+        dialog.TryClose();
+    }
+
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]
     public async Task DefaultsSurviveARoundTripThroughTheWindow()

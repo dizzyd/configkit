@@ -4,6 +4,7 @@
 // Released under the MIT License. See LICENSE at the repository root.
 
 using ConfigKit.Formatting;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json.Linq;
 using Vintagestory.API.Client;
@@ -35,6 +36,7 @@ public class ConfigDialog : GuiDialog
     private const double RowGap = 6;
     private const double LabelWidth = 330;
     private const double ControlWidth = 300;
+    private const double ValueWidth = 54;
 
     private readonly Dictionary<string, Config> _configs;
     private readonly List<string> _domains;
@@ -47,6 +49,10 @@ public class ConfigDialog : GuiDialog
     /// The control built for each setting, kept because container children are not
     /// reachable through the composer by key.
     private readonly Dictionary<string, GuiElement> _widgets = new();
+
+    /// The readout beside each slider. Kept separately from _widgets because it is not the
+    /// control for the setting, it only reports it.
+    private readonly Dictionary<string, GuiElementDynamicText> _sliderValues = new();
 
     private ElementBounds? _contentBounds;
     private double _contentHeight;
@@ -68,6 +74,16 @@ public class ConfigDialog : GuiDialog
     /// composed, and rebuilt whenever the selected mod changes.
     /// </summary>
     public IReadOnlyDictionary<string, ConfigSetting> RenderedSettings => _settingsByKey;
+
+    /// <summary>
+    /// What each slider's readout currently says, keyed by the setting's yaml code. The
+    /// number a player reads is not the slider's own value (floats are carried at 100x), so
+    /// this is worth asserting on directly.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> SliderValueTexts
+        => _sliderValues
+            .Where(entry => _settingsByKey.ContainsKey(entry.Key))
+            .ToDictionary(entry => _settingsByKey[entry.Key].YamlCode, entry => entry.Value.GetText());
 
     public override void OnGuiOpened()
     {
@@ -188,7 +204,7 @@ public class ConfigDialog : GuiDialog
         double y = 4;
         int index = 0;
 
-        if (container != null) _widgets.Clear();
+        if (container != null) { _widgets.Clear(); _sliderValues.Clear(); }
 
         foreach ((float _, IConfigBlock block) in config.ConfigBlocks)
         {
@@ -351,7 +367,7 @@ public class ConfigDialog : GuiDialog
 
             case ConfigSettingType.Integer when HasRange(validation):
             case ConfigSettingType.Float when HasRange(validation):
-                Remember(key, container, new GuiElementSlider(capi, value => OnSlider(setting, value), bounds));
+                AddSliderControl(container, setting, bounds, key);
                 break;
 
             case ConfigSettingType.Integer:
@@ -381,6 +397,35 @@ public class ConfigDialog : GuiDialog
     {
         _widgets[key] = element;
         container.Add(element);
+    }
+
+    /// <summary>
+    /// A slider with its current value beside it.
+    ///
+    /// Vanilla's own ShowTextWhenResting draws the number inside the track, where it rides
+    /// along under the handle and is scissored to the bar. It also shows the slider's own
+    /// integer: a float setting is carried at 100x (see FloatScale), so a value of 2.5 would
+    /// read 250. A separate readout avoids both, and reuses NumberText so the number matches
+    /// what the config file gets.
+    /// </summary>
+    private void AddSliderControl(GuiElementContainer container, ConfigSetting setting, ElementBounds bounds, string key)
+    {
+        ElementBounds sliderBounds = bounds.FlatCopy().WithFixedWidth(bounds.fixedWidth - ValueWidth - 8);
+        ElementBounds valueBounds = ElementBounds.Fixed(
+            bounds.fixedX + bounds.fixedWidth - ValueWidth, bounds.fixedY + 2, ValueWidth, bounds.fixedHeight);
+
+        GuiElementDynamicText readout = new(capi, NumberText(setting),
+            CairoFont.WhiteDetailText().WithOrientation(EnumTextOrientation.Right), valueBounds);
+
+        Remember(key, container, new GuiElementSlider(capi, value =>
+        {
+            bool handled = OnSlider(setting, value);
+            readout.SetNewText(NumberText(setting));
+            return handled;
+        }, sliderBounds));
+
+        _sliderValues[key] = readout;
+        container.Add(readout);
     }
 
     /// <summary>
@@ -498,6 +543,10 @@ public class ConfigDialog : GuiDialog
                         ToSliderInt(setting, validation!.Minimum!),
                         ToSliderInt(setting, validation.Maximum!),
                         Math.Max(1, validation.Step == null ? 1 : ToSliderInt(setting, validation.Step)));
+                    if (_sliderValues.TryGetValue(key, out GuiElementDynamicText? readout))
+                    {
+                        readout.SetNewText(NumberText(setting));
+                    }
                     break;
 
                 case GuiElementTextArea area:
