@@ -278,6 +278,19 @@ public class ConfigDialog : GuiDialog
         return renamed;
     }
 
+    /// <summary>The text in the filter box.</summary>
+    public string Filter => _filter;
+
+    /// <summary>Types into the filter box, as the player does.</summary>
+    public void SetFilter(string text)
+    {
+        string trimmed = text.Trim();
+        if (trimmed == _filter) return;
+
+        _filter = trimmed;
+        Recompose();
+    }
+
     /// <summary>Folds or unfolds a section, as clicking its heading does.</summary>
     public bool ToggleSectionNamed(string title) => ToggleSection(title);
 
@@ -319,7 +332,10 @@ public class ConfigDialog : GuiDialog
         {
             _allOpen = true;
             double unfolded = LayoutRows(null, _configs[_domain]);
-            _allOpen = unfolded <= MaxContentHeight;
+
+            // A filtered list is never folded - hiding half the matches behind a heading is
+            // the opposite of what the player just asked for.
+            _allOpen = _filter.Length > 0 || unfolded <= MaxContentHeight;
             _contentHeight = _allOpen ? unfolded : LayoutRows(null, _configs[_domain]);
         }
 
@@ -361,6 +377,8 @@ public class ConfigDialog : GuiDialog
                 OnDomainSelected,
                 dropdownBounds,
                 "domain");
+
+            AddFilterField(composer, dropdownBounds.fixedY);
         }
 
         composer
@@ -444,30 +462,51 @@ public class ConfigDialog : GuiDialog
 
         if (container != null) { _widgets.Clear(); _sliderValues.Clear(); }
 
-        // A heading and everything under it, until the next heading. Rows before the first
-        // heading belong to no section and are always shown - they are the config's own
-        // top level members, and hiding those behind a fold would be perverse.
-        string? section = null;
-        bool sectionOpen = true;
+        // Pair every block with the heading it sits under, so a filter can decide what to
+        // show before anything is drawn - a heading is only worth drawing if something under
+        // it survived.
+        List<(string? section, IConfigBlock block)> blocks = [];
+        string? walking = null;
 
         foreach ((float _, IConfigBlock block) in config.ConfigBlocks)
         {
+            if (block is IFormattingBlock heading && heading.Title != null)
+            {
+                walking = heading.Title;
+                continue;
+            }
+
+            blocks.Add((walking, block));
+        }
+
+        bool filtering = _filter.Length > 0;
+
+        // Filtering cuts across the folding: a player searching for "delay" wants every
+        // match, not the matches that happen to be in the one open section.
+        HashSet<string> withMatches = filtering
+            ? blocks.Where(entry => entry.section != null && Matches(entry.section, entry.block))
+                    .Select(entry => entry.section!)
+                    .ToHashSet()
+            : [];
+
+        string? headed = null;
+
+        foreach ((string? section, IConfigBlock block) in blocks)
+        {
             if (block is IFormattingBlock formatting)
             {
-                if (formatting.Title != null)
-                {
-                    section = formatting.Title;
-                    sectionOpen = _allOpen || section == _openSection;
-                    y = AddSectionHeader(container, section, sectionOpen, y);
-                    continue;
-                }
-
                 y = AddFormattingBlock(container, formatting, y);
                 continue;
             }
 
+            if (section != null && section != headed && (!filtering || withMatches.Contains(section)))
+            {
+                y = AddSectionHeader(container, section, filtering || _allOpen || section == _openSection, y);
+                headed = section;
+            }
+
             if (block is not ConfigSetting setting || setting.Hide) continue;
-            if (!sectionOpen) continue;
+            if (!Matches(section, block)) continue;
 
             string key = $"setting-{index++}";
             if (container == null)
@@ -525,6 +564,21 @@ public class ConfigDialog : GuiDialog
         }
 
         return y;
+    }
+
+    /// <summary>
+    /// Whether a row is on screen: what the filter matches, or - with no filter - what the
+    /// open section holds, plus everything belonging to no section at all.
+    /// </summary>
+    private bool Matches(string? section, IConfigBlock block)
+    {
+        if (block is not ConfigSetting setting || setting.Hide) return false;
+
+        if (_filter.Length == 0) return section == null || _allOpen || section == _openSection;
+
+        return LabelFor(setting).Contains(_filter, StringComparison.OrdinalIgnoreCase)
+            || setting.YamlCode.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+            || (section != null && section.Contains(_filter, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>A foldable heading. Opening one closes whichever was open before it.</summary>
@@ -1017,11 +1071,18 @@ public class ConfigDialog : GuiDialog
         composer.AddStaticText(Breadcrumb(), CairoFont.WhiteDetailText(),
             ElementBounds.Fixed(80, row.fixedY + 4, DialogWidth - 320, 26));
 
-        // Committed rather than live: recomposing on every keystroke takes the focus off the
-        // field the player is typing into.
+        AddFilterField(composer, row.fixedY);
+    }
+
+    /// <summary>
+    /// The filter, on whichever screen. Committed rather than live: recomposing on every
+    /// keystroke takes the focus off the field the player is typing into.
+    /// </summary>
+    private void AddFilterField(GuiComposer composer, double y)
+    {
         CommittingTextInput filter = new(capi,
-            ElementBounds.Fixed(DialogWidth - 230, row.fixedY, 230, 28),
-            text => { _filter = text.Trim(); Recompose(); },
+            ElementBounds.Fixed(DialogWidth - 230, y, 230, 28),
+            text => SetFilter(text),
             CairoFont.WhiteDetailText());
 
         filter.SetPlaceHolderText("filter");

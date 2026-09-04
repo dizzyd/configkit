@@ -70,10 +70,16 @@ public class RainCollector
 body, rather than a screen to scroll through. If the whole config fits without scrolling
 nothing is folded at all — there's no point hiding four settings behind three headings.
 
+**There is a filter box beside the mod dropdown**, and it cuts across the folding — a
+search for "door" shows every match, not the matches that happen to be in whichever section
+is open. A section's own name matches too, which brings out its whole body.
+
+![The main list filtered to one word](screenshots/ck-2-filter.png)
+
 Sections nest. A class inside a class gets a heading carrying both names, so a field three
 classes down still says where it came from:
 
-![A nested class as its own section](screenshots/ck-6-nested-object.png)
+![A nested class as its own section](screenshots/ck-7-nested-object.png)
 
 In the file it stays nested, exactly as `StoreModConfig` would have written it:
 
@@ -89,7 +95,7 @@ In the file it stays nested, exactly as `StoreModConfig` would have written it:
 One row on the main screen showing how many entries it holds; clicking it opens the
 container, with a breadcrumb back out, a filter, per-row delete, and Add.
 
-![A dictionary of block codes](screenshots/ck-2-codes.png)
+![A dictionary of block codes](screenshots/ck-3-codes.png)
 
 Why a separate screen rather than expanding in place: these are unbounded. A dictionary
 keyed by block code routinely runs to hundreds of entries in a real pack, and an entry row
@@ -99,9 +105,9 @@ needs a different set of columns — key, value, delete — than a settings row 
 
 The value's own fields, each with the right control:
 
-![A dictionary of objects](screenshots/ck-3-dictionary.png)
+![A dictionary of objects](screenshots/ck-4-dictionary.png)
 
-![One entry's fields](screenshots/ck-4-entry.png)
+![One entry's fields](screenshots/ck-5-entry.png)
 
 The row label comes from the field marked `[Key]`, falling back to the first string field,
 then an overridden `ToString()`, then `#0`. So you usually annotate nothing.
@@ -111,7 +117,7 @@ then an overridden `ToString()`, then `#0`. So you usually annotate nothing.
 `Dictionary<string, Dictionary<string, float>>` is the shape nothing else handles
 generically. Here the second level is the first level again:
 
-![A nested dictionary, two levels down](screenshots/ck-5-nested.png)
+![A nested dictionary, two levels down](screenshots/ck-6-nested.png)
 
 ---
 

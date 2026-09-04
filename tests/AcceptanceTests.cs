@@ -180,6 +180,21 @@ public class AcceptanceTests
         await Frames.Wait(6);
         Assert.Equal(2, dialog.RenderedSettings.Count);
 
+        // A filter cuts across the folding: a player searching for "enabled" wants all twelve
+        // matches, not the one that happens to be in the open section.
+        dialog.SetFilter("enabled");
+        await Frames.Wait(6);
+        Assert.Equal(12, dialog.RenderedSettings.Count);
+
+        // And a section's own name matches, so its whole body comes out.
+        dialog.SetFilter("Pump");
+        await Frames.Wait(6);
+        Assert.Equal(2, dialog.RenderedSettings.Count);
+
+        dialog.SetFilter("");
+        await Frames.Wait(6);
+        Assert.Equal(2, dialog.RenderedSettings.Count);      // back to the open section only
+
         dialog.TryClose();
     }
 
@@ -211,6 +226,20 @@ public class AcceptanceTests
         Assert.True(dialog.OpenSetting("C07"));
         await Frames.Wait(4);
         Assert.True(dialog.Back());
+        await Frames.Wait(4);
+
+        // Thirty-one rows is a lot of scrolling, so the list filters.
+        dialog.SetFilter("L1");
+        await Frames.Wait(6);
+
+        string[] shown = dialog.RenderedSettings.Values.Select(setting => setting.YamlCode).ToArray();
+        Assert.Equal(6, shown.Length);                       // L10 to L15
+        Assert.True(shown.All(code => code.StartsWith("L1")),
+            $"the filter let something else through: {string.Join(", ", shown)}");
+
+        dialog.SetFilter("");
+        await Frames.Wait(6);
+        Assert.Equal(31, dialog.RenderedSettings.Count);
 
         dialog.TryClose();
     }

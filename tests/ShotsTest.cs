@@ -119,6 +119,12 @@ public class ShotsTest
         await Frames.Wait(12);
         await Shot.Take("ck-1-sections");
 
+        dialog.SetFilter("door");
+        await Frames.Wait(12);
+        await Shot.Take("ck-7-filter");
+        dialog.SetFilter("");
+        await Frames.Wait(12);
+
         dialog.OpenSetting("AutoCloseDelays");
         await Frames.Wait(12);
         await Shot.Take("ck-2-codes");
