@@ -608,8 +608,17 @@ public sealed class Config : IConfig, IDisposable
         }
         catch (Exception exception)
         {
-            LoggerUtil.Verbose(_api, this, $"[ParseJson] Error on parsing config file:\n{exception}\nFile content:\n{jsonConfig}");
-            throw;
+            // Loudly, and then carry on with the defaults. Throwing here took the whole
+            // config down and left the mod running on its compiled-in values with nothing
+            // in the game to say why - which is the exact failure this library exists to
+            // avoid, and it was reintroduced right here. The file itself is left alone, so
+            // whatever the player broke is still there to be fixed.
+            LoggerUtil.Error(_api, this,
+                $"Could not read '{ConfigFilePath}': {exception.Message}. "
+                + "Every setting for this mod is at its default until that file is valid JSON; "
+                + "the file has not been overwritten.");
+
+            jsonConfigObject = new(JObject.Parse(defaultConfig));
         }
 
         foreach (ConfigSetting setting in settings.Values)
@@ -917,7 +926,13 @@ public sealed class Config : IConfig, IDisposable
         // them. Convert handles every boxed numeric and enum.
         try
         {
-            if (value is Enum) return new JValue(Convert.ToInt32(value, CultureInfo.InvariantCulture));
+            // A [Flags] enum is modelled as a string, so its default is its combined name.
+            if (value is Enum)
+            {
+                return settingType == ConfigSettingType.String
+                    ? new JValue(value.ToString())
+                    : new JValue(Convert.ToInt32(value, CultureInfo.InvariantCulture));
+            }
 
             return settingType switch
             {

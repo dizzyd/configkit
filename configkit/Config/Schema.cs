@@ -548,7 +548,15 @@ internal static class SchemaBuilder
     /// </summary>
     internal static ConfigSettingType ScalarTypeOf(Type type)
     {
-        if (type.IsEnum) return ConfigSettingType.Integer;
+        // A [Flags] value is a combination - "North, South" - which is not any one member,
+        // so the name-to-member mapping a plain enum uses cannot express it and silently
+        // stored the first name instead. Its own string form round-trips exactly.
+        if (type.IsEnum)
+        {
+            return type.GetCustomAttribute<FlagsAttribute>() != null
+                ? ConfigSettingType.String
+                : ConfigSettingType.Integer;
+        }
         if (type == typeof(string)) return ConfigSettingType.String;
         if (type == typeof(bool)) return ConfigSettingType.Boolean;
 

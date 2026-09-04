@@ -235,7 +235,16 @@ public class ConfigSetting : ISetting
 
         try
         {
-            if (type.IsEnum) return Enum.ToObject(type, value.AsInt());
+            if (type.IsEnum)
+            {
+                // A [Flags] value is stored by name ("North, South"); a plain enum resolves
+                // through its mapping to a number.
+                string? name = value.Token?.Type == JTokenType.String ? value.AsString() : null;
+
+                return string.IsNullOrWhiteSpace(name)
+                    ? Enum.ToObject(type, value.AsInt())
+                    : Enum.Parse(type, name, ignoreCase: true);
+            }
 
             return SettingType switch
             {
