@@ -135,8 +135,10 @@ All stock .NET. `System.ComponentModel`, `System.ComponentModel.DataAnnotations`
 | `[AllowedValues(…)]` | Dropdown of fixed choices |
 | `[Category("Doors")]` | Puts the setting in a section called Doors |
 | `[Category("Doors, clientside")]` | Section, plus the flag |
-| `[DisplayName("…")]` | Label, instead of the tidied-up field name |
-| `[Display(GroupName=, Name=, Order=)]` | Section, label and sort weight |
+| `[Display(Name = "…")]` | Label, instead of the tidied-up field name |
+| `[DisplayName("…")]` | The same, but **only on a property** — see below |
+| `[Display(GroupName = "…")]` | Section |
+| `[Display(Order = n)]` | Where the row sits; lower is earlier |
 | `[Key]` | On a field of a list element: which field labels its row |
 | `[DataType("blockcode")]` | Keys are block codes — see below |
 | `[JsonProperty("…")]` | The key to write in the file |
@@ -153,8 +155,17 @@ display and keeps the key in the file; the second is about serialisation and rem
 Reach for `Browsable` unless you actually want the value gone.
 
 Labels come from the field name, tidied up: `LitresPerHour` reads "Litres per hour". Ship a
-translation for `<yourmod>:setting-LitresPerHour` to override it for real, or `[DisplayName]`
-for a quick fix.
+translation to override it properly — the key is the setting's path with the prefix, so
+`<yourmod>:setting-RainCollector-LitresPerHour` — or `[Display(Name = "…")]` for a quick fix.
+
+**`[DisplayName]` does not work on a field.** Its `AttributeUsage` allows class, method,
+property, indexer and event, and a config class is nearly always public fields, so reach for
+`[Display(Name = "…")]` instead — it allows fields and does the same job. `[DisplayName]` is
+there for the properties case.
+
+Rows sit in the order they are declared. `[Display(Order = n)]` moves one; anything without
+it sorts after everything that has it, which is the convention `DisplayAttribute` documents
+for itself.
 
 ### `[DataType]`, and why it earns its place
 

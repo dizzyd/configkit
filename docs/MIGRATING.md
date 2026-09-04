@@ -156,7 +156,8 @@ All of them are stock .NET. Your settings class keeps no reference to ConfigKit.
 | `[DefaultValue(x)]` | Value used by "restore defaults" |
 | `[Category("…")]` | Groups settings under a foldable heading |
 | `[AllowedValues(…)]` | Dropdown of fixed choices |
-| `[DisplayName("…")]` | Label, instead of the tidied-up field name |
+| `[Display(Name = "…")]` | Label, instead of the tidied-up field name |
+| `[DisplayName("…")]` | The same, but **only on a property** — see below |
 | `[JsonProperty("…")]` | The key to write in the file, when it differs from the field name |
 | `[Browsable(false)]` | Hidden from the screen, still saved |
 | `[JsonIgnore]` | Not saved at all |

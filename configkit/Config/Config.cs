@@ -732,7 +732,7 @@ public sealed class Config : IConfig, IDisposable
         List<(SchemaNode node, object? owner)> flat = [];
         Flatten(schema.Nodes, root, flat);
 
-        foreach ((SchemaNode node, object? owner) in flat.Where(entry => entry.node.Section == null))
+        foreach ((SchemaNode node, object? owner) in InOrder(flat.Where(entry => entry.node.Section == null)))
         {
             settings.Add(DefinitionFor(node, owner, domain));
         }
@@ -746,12 +746,21 @@ public sealed class Config : IConfig, IDisposable
         {
             AddSeparator(settings, section);
 
-            foreach ((SchemaNode node, object? owner) in flat.Where(entry => entry.node.Section == section))
+            foreach ((SchemaNode node, object? owner) in InOrder(flat.Where(entry => entry.node.Section == section)))
             {
                 settings.Add(DefinitionFor(node, owner, domain));
             }
         }
     }
+
+    /// <summary>
+    /// Sorts a group of rows by their weight. The array-format parser numbers blocks by their
+    /// position and ignores any weight they declare, so ordering has to happen here, before
+    /// they are emitted. OrderBy is stable, so members that said nothing keep the order they
+    /// were declared in.
+    /// </summary>
+    private static IEnumerable<(SchemaNode node, object? owner)> InOrder(IEnumerable<(SchemaNode node, object? owner)> group)
+        => group.OrderBy(entry => entry.node.Weight);
 
     /// <summary>
     /// Flattens the schema to the members that become settings, pairing each with the object

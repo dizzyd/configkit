@@ -66,6 +66,8 @@ internal sealed class SchemaNode
     /// <summary>Hidden from the settings screen, but still persisted. [Browsable(false)].</summary>
     public bool Hidden;
     public bool ReadOnly;
+    /// <summary>Where the row sits: declaration order unless [Display(Order)] says otherwise.</summary>
+    public float Weight;
 
     // Kind-specific.
     public ConfigSettingType ScalarType;        // Scalar
@@ -160,6 +162,9 @@ internal static class SchemaBuilder
     /// </summary>
     private const int MaxDepth = 5;
 
+    /// <summary>Where members that declared no [Display(Order)] start. DataAnnotations' own default.</summary>
+    private const int UnorderedBase = 10000;
+
     private static readonly Dictionary<Type, ConfigSchema> _cache = [];
     private static readonly object _cacheLock = new();
 
@@ -175,9 +180,11 @@ internal static class SchemaBuilder
         visiting.Push(type);
 
         List<SchemaNode> nodes = [];
+        int position = 0;
+
         foreach (MemberInfo member in Members(type))
         {
-            SchemaNode? node = Build(member, prefix: "", section: null, visiting, depth: 1, notices);
+            SchemaNode? node = Build(member, prefix: "", section: null, visiting, depth: 1, notices, position++);
             if (node != null) nodes.Add(node);
         }
 
@@ -218,7 +225,7 @@ internal static class SchemaBuilder
         }
     }
 
-    private static SchemaNode? Build(MemberInfo member, string prefix, string? section, Stack<Type> visiting, int depth, List<string> notices)
+    private static SchemaNode? Build(MemberInfo member, string prefix, string? section, Stack<Type> visiting, int depth, List<string> notices, int position)
     {
         Type memberType = (member as PropertyInfo)?.PropertyType ?? ((FieldInfo)member).FieldType;
 
@@ -238,6 +245,16 @@ internal static class SchemaBuilder
             Comment = member.GetCustomAttribute<DescriptionAttribute>()?.Description,
             Label = ExplicitLabel(member),
             KeySource = member.GetCustomAttribute<DataTypeAttribute>()?.CustomDataType,
+
+            // A member that said nothing sorts after every member that did, which is the
+            // convention DataAnnotations itself uses - DisplayAttribute.Order documents 10000
+            // as its unset value. Without the offset an explicit Order of 0 merely ties with
+            // whatever happened to be declared first.
+            //
+            // "Declaration order" is GetMembers order, which for a class mixing fields and
+            // properties is not quite source order. Config classes are almost always all
+            // fields, and this is the same order the walk this replaced used.
+            Weight = member.GetCustomAttribute<DisplayAttribute>()?.GetOrder() ?? (UnorderedBase + position),
         };
 
         node.Path = prefix.Length == 0 ? node.Code : $"{prefix}/{node.Code}";
@@ -469,9 +486,11 @@ internal static class SchemaBuilder
         visiting.Push(type);
         try
         {
+            int position = 0;
+
             foreach (MemberInfo member in Members(type))
             {
-                SchemaNode? child = Build(member, node.Path, ChildSection(node), visiting, depth + 1, notices);
+                SchemaNode? child = Build(member, node.Path, ChildSection(node), visiting, depth + 1, notices, position++);
                 if (child == null) continue;
 
                 child.Parent = node;

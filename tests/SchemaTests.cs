@@ -80,6 +80,27 @@ public class SchemaTests
         public Chutes Chutes = new();
     }
 
+    /// <summary>Every remaining row of the documented attribute table, in one class.</summary>
+    public class TableSettings
+    {
+        /// <summary>
+        /// [DisplayName] cannot go on a field - its AttributeUsage allows class, method,
+        /// property, indexer and event only - so on a property it is, and fields use
+        /// [Display(Name)] instead.
+        /// </summary>
+        [DisplayName("How far it looks")]
+        public int SearchRadius { get; set; } = 12;
+
+        [Display(Name = "Speed multiplier", Order = 0)]
+        public float Speed = 1.5f;
+
+        [AllowedValues(1, 2, 4, 8)]
+        public int Step = 2;
+
+        [Description("What it says on the label.")]
+        public bool Enabled = true;
+    }
+
     public class TaggedSettings
     {
         [Category("Waypoints, clientside")]
@@ -406,6 +427,41 @@ public class SchemaTests
         Assert.Equal(2, keys.Distinct().Count(), $"two settings share one lang key: {string.Join(", ", keys)}");
         Assert.True(keys.Contains("schema-lang:setting-Doors-Enabled"),
             $"expected the path in the key; got {string.Join(", ", keys)}");
+    }
+
+    /// <summary>
+    /// The rest of the attribute table, checked against the code rather than against the
+    /// document that claims them. Three entries in that table turned out to do nothing at
+    /// all, so the table is not evidence of anything by itself.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task TheDocumentedAttributesAllDoSomething()
+    {
+        await OnServer();
+
+        Config config = Fresh(new TableSettings(), "schema-table", "configkit-schema-table.json");
+
+        JsonObject[] blocks = config.Definition["settings"].AsArray();
+
+        // [Display(Order = 0)] moves a member declared second to the front.
+        Assert.Equal("Speed", blocks[0]["code"].AsString());
+
+        JsonObject radius = blocks.First(b => b["code"].AsString() == "SearchRadius");
+        JsonObject step = blocks.First(b => b["code"].AsString() == "Step");
+        JsonObject enabled = blocks.First(b => b["code"].AsString() == "Enabled");
+        JsonObject speed = blocks[0];
+
+        // [DisplayName] and [Display(Name)] both become the label, verbatim rather than a
+        // lang key the screen would have to fall back from.
+        Assert.Equal("How far it looks", radius["ingui"].AsString());
+        Assert.Equal("Speed multiplier", speed["ingui"].AsString());
+
+        // [Description] is the hover text.
+        Assert.Equal("What it says on the label.", enabled["comment"].AsString());
+
+        // [AllowedValues] is a dropdown of fixed choices.
+        Assert.True(step.KeyExists("values"), $"[AllowedValues] produced nothing: {step}");
+        Assert.Equal(4, step["values"].AsArray().Length);
     }
 
     // ---------------------------------------------------------------- exclusion
