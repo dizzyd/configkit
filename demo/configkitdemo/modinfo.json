@@ -1,0 +1,17 @@
+{
+    "type": "code",
+    "modid": "configkitdemo",
+    "name": "ConfigKit demo",
+    "authors": [
+        "Dave (Dizzy) Smith"
+    ],
+    "description": "A settings class holding one of every shape ConfigKit can render, for poking at in a live game. Not for release.",
+    "version": "1.0.0",
+    "dependencies": {
+        "game": "1.22.0",
+        "configkit": ""
+    },
+    "side": "universal",
+    "requiredOnClient": true,
+    "requiredOnServer": false
+}

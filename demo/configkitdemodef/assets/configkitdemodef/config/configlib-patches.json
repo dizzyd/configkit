@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "settings": [
+    { "type": "separator", "title": "Behaviour",
+      "text": "A separator carries a title and an explanatory line. Both should be here." },
+
+    { "type": "boolean", "code": "enabled", "nameInGui": "Enabled",
+      "default": true, "comment": "Turns the whole thing on and off." },
+    { "type": "integer", "code": "radius", "nameInGui": "Search radius",
+      "default": 12, "range": { "min": 4, "max": 40 } },
+    { "type": "float", "code": "speed", "nameInGui": "Speed multiplier",
+      "default": 1.5, "range": { "min": 0.5, "max": 4.0 } },
+    { "type": "integer", "code": "limit", "nameInGui": "Hard limit (no range)", "default": 250 },
+    { "type": "string", "code": "label", "nameInGui": "Label text", "default": "gravestone" },
+
+    { "type": "separator", "title": "Choices",
+      "text": "Fixed sets of values, and a colour." },
+
+    { "type": "string", "code": "mode", "nameInGui": "Mode",
+      "default": "balanced", "values": [ "gentle", "balanced", "brutal" ] },
+    { "type": "integer", "code": "tier", "nameInGui": "Tier",
+      "default": 2, "mapping": { "copper": 1, "bronze": 2, "iron": 3, "steel": 4 } },
+    { "type": "color", "code": "markerColor", "nameInGui": "Marker colour",
+      "default": "#4FBFA8", "comment": "Hex colour of the marker." },
+    { "type": "color", "code": "brokenColor", "nameInGui": "Colour (deliberately invalid)",
+      "default": "not-a-colour" },
+
+    { "type": "separator", "title": "Client side",
+      "text": "Marked clientSide, so a server cannot take these off you." },
+
+    { "type": "boolean", "code": "showOverlay", "nameInGui": "Show overlay",
+      "default": true, "clientSide": true },
+    { "type": "integer", "code": "overlayOpacity", "nameInGui": "Overlay opacity",
+      "default": 80, "range": { "min": 0, "max": 100 }, "clientSide": true },
+
+    { "type": "separator", "title": "Long enough to fold",
+      "text": "With this many rows the screen no longer fits, so the sections fold." },
+
+    { "type": "integer", "code": "extra1", "nameInGui": "Extra one", "default": 1 },
+    { "type": "integer", "code": "extra2", "nameInGui": "Extra two", "default": 2 },
+    { "type": "integer", "code": "extra3", "nameInGui": "Extra three", "default": 3 },
+    { "type": "integer", "code": "extra4", "nameInGui": "Extra four", "default": 4 },
+    { "type": "integer", "code": "extra5", "nameInGui": "Extra five", "default": 5 }
+  ]
+}

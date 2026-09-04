@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <OutputPath>bin\$(Configuration)\Mods\mod</OutputPath>
+        <AssemblyName>ConfigKitDemo</AssemblyName>
+        <RootNamespace>ConfigKitDemo</RootNamespace>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <LangVersion>latest</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Reference Include="VintagestoryAPI">
+            <HintPath>$(VINTAGE_STORY)/VintagestoryAPI.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="Newtonsoft.Json">
+            <HintPath>$(VINTAGE_STORY)/Lib/Newtonsoft.Json.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <!-- The mod system needs this to call RegisterManagedConfig. The settings class
+             below does not, and deliberately references nothing but the BCL. -->
+        <Reference Include="ConfigKit">
+            <HintPath>../../configkit/bin/$(Configuration)/Mods/mod/ConfigKit.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+    </ItemGroup>
+
+    <Target Name="CopyModinfo" AfterTargets="Build">
+        <Copy SourceFiles="modinfo.json" DestinationFolder="$(OutputPath)" />
+    </Target>
+
+</Project>

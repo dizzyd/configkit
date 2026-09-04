@@ -1,0 +1,14 @@
+{
+    "type": "content",
+    "modid": "configkitdemodef",
+    "name": "ConfigKit demo (definition)",
+    "authors": [
+        "Dave (Dizzy) Smith"
+    ],
+    "description": "The same settings screen, driven by a configlib-patches.json instead of a C# class. Ships no code at all.",
+    "version": "1.0.0",
+    "dependencies": {
+        "game": "1.22.0"
+    },
+    "side": "universal"
+}
