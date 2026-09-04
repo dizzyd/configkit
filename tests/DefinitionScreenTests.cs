@@ -55,6 +55,72 @@ public class DefinitionScreenTests
     }
 
     /// <summary>
+    /// Better Ruins' shape, and the one that showed this was wrong in a live game: the
+    /// category-map format, with the separators declared in a separate "formatting" array and
+    /// positioned among the settings by weight. Sixty-five flat settings with ten dividers
+    /// through them - dividers the author placed for rhythm, not containers.
+    /// </summary>
+    private static string CategoryMapDefinition(int settings, int dividers)
+    {
+        StringBuilder json = new();
+        json.Append("{ \"version\": 1, \"settings\": { \"integer\": {");
+
+        for (int index = 0; index < settings; index++)
+        {
+            json.Append($"\"N{index:00}\": {{ \"default\": {index}, \"weight\": {index} }}");
+            if (index < settings - 1) json.Append(',');
+        }
+
+        json.Append("} }, \"formatting\": [");
+
+        for (int index = 0; index < dividers; index++)
+        {
+            float weight = index * (settings / (float)dividers) + 0.5f;
+            json.Append($"{{ \"type\": \"separator\", \"title\": \"Part {index}\", ")
+                .Append($"\"weight\": {weight.ToString(System.Globalization.CultureInfo.InvariantCulture)} }}");
+            if (index < dividers - 1) json.Append(',');
+        }
+
+        return json.Append("] }").ToString();
+    }
+
+    /// <summary>
+    /// A definition's separators are dividers, not containers, so they never fold however
+    /// long the list is. Folding them turned a legible sixty-five row screen into ten
+    /// collapsed boxes with nothing in them.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task ALongDividedDefinitionDoesNotFold()
+    {
+        await OnClient();
+
+        string source = CategoryMapDefinition(65, 10);
+        Config config = new(Capi, "def-divided", "def-divided", new JsonObject(JToken.Parse(source)));
+
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { ["def-divided"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(8);
+
+        string seen = $"sections={dialog.Sections.Count} rendered={dialog.RenderedSettings.Count} "
+                    + $"allOpen={dialog.EverythingShown} codes={config.SettingCodes.Count()}";
+
+        // The separators here sit on weights the settings also use, which is what turned up
+        // an unguarded Add in ConstructYaml: it threw, and the config came back empty.
+        Assert.True(config.SettingCodes.Count() == 65, $"the config came back empty: {seen}");
+        Assert.True(dialog.Sections.Count == 10, $"expected 10 dividers: {seen}");
+        Assert.True(dialog.EverythingShown, $"an author's dividers were treated as folds: {seen}");
+        Assert.True(dialog.RenderedSettings.Count == 65, $"expected every row: {seen}");
+
+        // The filter still narrows it, which is what makes a list this long usable.
+        dialog.SetFilter("N4");
+        await Frames.Wait(6);
+        Assert.Equal(10, dialog.RenderedSettings.Count);
+
+        dialog.TryClose();
+    }
+
+    /// <summary>
     /// The common case by a distance: a flat definition with no separators. Nothing groups it,
     /// so nothing can fold it, and every row is on screen exactly as before.
     /// </summary>
@@ -96,7 +162,7 @@ public class DefinitionScreenTests
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]
-    public async Task ALongGroupedDefinitionNowFolds()
+    public async Task ALongGroupedDefinitionStillShowsEveryRow()
     {
         await OnClient();
 
@@ -104,16 +170,12 @@ public class DefinitionScreenTests
         await Frames.Wait(8);
 
         Assert.Equal(6, dialog.Sections.Count);
-        Assert.False(dialog.EverythingShown);
 
-        // Every row belongs to a group, so with none open the screen is headings alone.
-        Assert.Equal(0, dialog.RenderedSettings.Count);
+        // Folding belongs to sections derived from a class. A definition's separators are the
+        // author's own dividers, and hiding their rows changes a screen they laid out.
+        Assert.True(dialog.EverythingShown);
+        Assert.Equal(30, dialog.RenderedSettings.Count);
 
-        dialog.ToggleSectionNamed("Group 3");
-        await Frames.Wait(6);
-        Assert.Equal(5, dialog.RenderedSettings.Count);
-
-        // The filter reaches them without opening anything.
         dialog.SetFilter("Number 22");
         await Frames.Wait(6);
         Assert.Equal(1, dialog.RenderedSettings.Count);
@@ -143,23 +205,18 @@ public class DefinitionScreenTests
         dialog.TryClose();
     }
 
-    /// <summary>A folded section says nothing but its name; unfolding brings its line back.</summary>
+    /// <summary>A long definition keeps its prose too, however many rows it has.</summary>
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]
-    public async Task AFoldedSectionsProseComesBackWithIt()
+    public async Task ALongDefinitionKeepsItsProse()
     {
         await OnClient();
 
-        ConfigDialog dialog = Open("def-prose-fold", 30, titledSections: true);
+        ConfigDialog dialog = Open("def-prose-long", 30, titledSections: true);
         await Frames.Wait(8);
 
-        Assert.False(dialog.RenderedNotes.Contains("What group 3 is for."), "a folded section still spoke");
-
-        dialog.ToggleSectionNamed("Group 3");
-        await Frames.Wait(6);
-
         Assert.True(dialog.RenderedNotes.Contains("What group 3 is for."),
-            $"unfolding did not bring the line back; on screen: {string.Join(" | ", dialog.RenderedNotes)}");
+            $"a section's line is missing; on screen: {string.Join(" | ", dialog.RenderedNotes)}");
 
         dialog.TryClose();
     }

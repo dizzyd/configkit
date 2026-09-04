@@ -74,6 +74,12 @@ public class ConfigDialog : GuiDialog
     /// pure obstruction. Measured, not guessed - the layout pass already reports its height.
     private bool _allOpen;
 
+    /// Whether this config's headings are structure or decoration. A section derived from a
+    /// class is a container and folds; a separator an author placed in a definition file is a
+    /// divider between rows of one flat list, and folding those turns a legible screen into
+    /// ten collapsed boxes.
+    private bool _foldable;
+
     /// The container the player has opened, and the containers above it. Empty is the root
     /// screen. Recursion here is a stack of screens rather than a recursive layout, which is
     /// why a dictionary of dictionaries needs no code of its own.
@@ -372,8 +378,9 @@ public class ConfigDialog : GuiDialog
             double unfolded = LayoutRows(null, _configs[_domain]);
 
             // A filtered list is never folded - hiding half the matches behind a heading is
-            // the opposite of what the player just asked for.
-            _allOpen = _filter.Length > 0 || unfolded <= MaxContentHeight;
+            // the opposite of what the player just asked for - and neither is a config whose
+            // headings are an author's dividers rather than structure.
+            _allOpen = !_foldable || _filter.Length > 0 || unfolded <= MaxContentHeight;
             _contentHeight = _allOpen ? unfolded : LayoutRows(null, _configs[_domain]);
         }
 
@@ -521,6 +528,7 @@ public class ConfigDialog : GuiDialog
         }
 
         bool filtering = _filter.Length > 0;
+        _foldable = config.Schema != null;
 
         // Filtering cuts across the folding: a player searching for "delay" wants every
         // match, not the matches that happen to be in the one open section.
@@ -547,7 +555,10 @@ public class ConfigDialog : GuiDialog
 
             if (section != null && section != headed && (!filtering || withMatches.Contains(section)))
             {
-                y = AddSectionHeader(container, section, filtering || _allOpen || section == _openSection, y);
+                y = _foldable
+                    ? AddSectionHeader(container, section, filtering || _allOpen || section == _openSection, y)
+                    : AddFormattingBlock(container, _headingBlocks[section], y);
+
                 headed = section;
             }
 
@@ -591,7 +602,7 @@ public class ConfigDialog : GuiDialog
                 // its entries need a different set of columns than a setting row has.
                 ConfigSetting owner = setting;
                 SchemaNode owned = node!;
-                container.Add(new GuiElementTextButton(capi, EntryCountText(setting) + "  \u2192",
+                container.Add(new GuiElementTextButton(capi, EntryCountText(setting) + "  >",
                     CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
                     () => OpenContainer(owner, owned, LabelFor(setting), locked),
                     controlBounds, EnumButtonStyle.Small));
@@ -623,7 +634,10 @@ public class ConfigDialog : GuiDialog
     {
         if (block is not ConfigSetting setting || setting.Hide) return false;
 
-        if (_filter.Length == 0) return section == null || _allOpen || section == _openSection;
+        if (_filter.Length == 0)
+        {
+            return section == null || !_foldable || _allOpen || section == _openSection;
+        }
 
         return LabelFor(setting).Contains(_filter, StringComparison.OrdinalIgnoreCase)
             || setting.YamlCode.Contains(_filter, StringComparison.OrdinalIgnoreCase)
@@ -635,14 +649,22 @@ public class ConfigDialog : GuiDialog
     {
         if (container != null)
         {
-            string label = (open ? "\u25bc  " : "\u25b6  ") + title;
-            // A minimum, so a two word heading is not a tiny button beside a long one.
-            double width = Math.Clamp(44 + label.Length * 8.5, 150, DialogWidth - 40);
+            // ASCII, not a geometric arrow. The game's font carries no U+25B6 on every
+            // platform, and a heading that renders as an empty box on someone's machine is
+            // worse than one that is merely plain.
+            string label = (open ? "  [-]  " : "  [+]  ") + title;
 
-            container.Add(new GuiElementTextButton(capi, label,
+            // One width for every heading, and left aligned. Sizing each button to its own
+            // text made a column that stepped in and out down the screen; leaving the text
+            // centred - which is all GuiElementTextButton does by default - made every
+            // heading float in the middle while its rows sat at the margin.
+            GuiElementTextButton toggle = new(capi, label,
                 CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
                 () => ToggleSection(title),
-                ElementBounds.Fixed(0, y + 4, width, 26), EnumButtonStyle.Small));
+                ElementBounds.Fixed(0, y + 4, DialogWidth - 40, 26), EnumButtonStyle.Small);
+
+            toggle.SetOrientation(EnumTextOrientation.Left);
+            container.Add(toggle);
         }
 
         y += SectionHeight;
@@ -1162,7 +1184,7 @@ public class ConfigDialog : GuiDialog
     }
 
     private string Breadcrumb()
-        => string.Join("  ›  ", new[] { DisplayName(_domain) }.Concat(_stack.Select(frame => frame.Crumb)));
+        => string.Join("  >  ", new[] { DisplayName(_domain) }.Concat(_stack.Select(frame => frame.Crumb)));
 
     /// <summary>
     /// One row per entry: its key, its value, and a way to remove it. A value that is itself
@@ -1445,7 +1467,7 @@ public class ConfigDialog : GuiDialog
         if (opens)
         {
             List<object> path = new(frame.Path) { step };
-            container.Add(new GuiElementTextButton(capi, NestedButtonText(value, schema!) + "  →",
+            container.Add(new GuiElementTextButton(capi, NestedButtonText(value, schema!) + "  >",
                 CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
                 () => OpenNested(frame, path, schema!, label),
                 bounds, EnumButtonStyle.Small));

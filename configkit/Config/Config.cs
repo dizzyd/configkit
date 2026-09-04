@@ -803,7 +803,7 @@ public sealed class Config : IConfig, IDisposable
         return new JObject
         {
             { "type", "separator" },
-            { "text", $"{label} — not editable ({node.DeadReason ?? "unsupported"})" }
+            { "text", $"{label} - not editable ({node.DeadReason ?? "unsupported"})" }
         };
     }
 
@@ -1437,7 +1437,7 @@ public sealed class Config : IConfig, IDisposable
     /// workaround added a fixed 1E-10f - which for any weight of 1 or more is lost entirely
     /// in float32, so Add threw and the catch upstream left the mod with an empty config.
     /// </summary>
-    private static float NextFreeWeight(SortedDictionary<float, IConfigBlock> taken, float weight)
+    private static float NextFreeWeight<T>(SortedDictionary<float, T> taken, float weight)
     {
         while (taken.ContainsKey(weight))
         {
@@ -1494,11 +1494,16 @@ public sealed class Config : IConfig, IDisposable
     {
         SettingsToYaml(settings, out SortedDictionary<float, string> yaml);
 
-        yaml.Add(-1, $"version: {version}");
+        yaml.Add(NextFreeWeight(yaml, -1), $"version: {version}");
 
+        // Guarded, like every other place a weight becomes a key. A separator whose weight
+        // matched a setting's threw here, and the constructor's catch turned that into a
+        // config with no settings at all - the mod silently running on its compiled-in
+        // defaults. Both of the other two places that key by weight already guarded; this
+        // one was missed.
         foreach ((float weight, IConfigBlock block) in formatting.Where(entry => entry.Value is IFormattingBlock))
         {
-            yaml.Add(weight, (block as IFormattingBlock)?.Yaml ?? "");
+            yaml.Add(NextFreeWeight(yaml, weight), (block as IFormattingBlock)?.Yaml ?? "");
         }
 
         return yaml.Select(entry => entry.Value).Aggregate((first, second) => $"{first}\n{second}");
@@ -1564,13 +1569,7 @@ public sealed class Config : IConfig, IDisposable
         {
             float weight = setting.SortingWeight < 0 ? 0 : setting.SortingWeight;
 
-            while (yaml.ContainsKey(weight))
-            {
-                float next = MathF.BitIncrement(weight);
-                weight = next > weight ? next : weight + 1f;
-            }
-
-            yaml.Add(weight, setting.ToYaml());
+            yaml.Add(NextFreeWeight(yaml, weight), setting.ToYaml());
         }
     }
     private void SettingsFromJson(Dictionary<string, ConfigSetting> settings, JsonObject definition, ref int version, string domain)

@@ -523,7 +523,7 @@ internal static class SchemaBuilder
         // up the same way a label is, so a heading reads "Rain collector" and not
         // "RainCollector".
         string own = node.Label ?? Humanize(node.Code);
-        return node.Section == null ? own : $"{node.Section} › {own}";
+        return node.Section == null ? own : $"{node.Section} > {own}";
     }
 
     // ------------------------------------------------------------------ attributes

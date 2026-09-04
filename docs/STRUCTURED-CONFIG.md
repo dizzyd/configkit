@@ -70,6 +70,11 @@ public class RainCollector
 body, rather than a screen to scroll through. If the whole config fits without scrolling
 nothing is folded at all — there's no point hiding four settings behind three headings.
 
+Folding is for sections that come from a **class**. A separator in a
+`configlib-patches.json` is a divider its author placed between rows of one flat list, so
+those are drawn as plain headings and nothing is hidden — see
+[COMPATIBILITY.md](COMPATIBILITY.md).
+
 **There is a filter box beside the mod dropdown**, and it cuts across the folding — a
 search for "door" shows every match, not the matches that happen to be in whichever section
 is open. A section's own name matches too, which brings out its whole body.
