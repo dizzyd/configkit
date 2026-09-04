@@ -9,6 +9,7 @@
 using Newtonsoft.Json.Linq;
 using ProtoBuf;
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
@@ -176,7 +177,14 @@ public class ConfigSetting : ISetting
     internal static string NormalizeName(string name) => name.ToLowerInvariant().Replace("_", "");
     private bool AssignSettingValue(object target, PropertyInfo? property)
     {
-        if (property == null || !property.CanWrite) return false;
+        if (property == null) return false;
+
+        if (!property.CanWrite)
+        {
+            return SettingType == ConfigSettingType.Other
+                && property.CanRead
+                && FillInPlace(property.GetValue(target));
+        }
 
         object? value = CoerceTo(property.PropertyType);
         if (value == null && property.PropertyType.IsValueType) return false;
@@ -188,6 +196,11 @@ public class ConfigSetting : ISetting
     private bool AssignSettingValue(object target, FieldInfo? field)
     {
         if (field == null) return false;
+
+        if (field.IsInitOnly)
+        {
+            return SettingType == ConfigSettingType.Other && FillInPlace(field.GetValue(target));
+        }
 
         object? value = CoerceTo(field.FieldType);
         if (value == null && field.FieldType.IsValueType) return false;
@@ -229,9 +242,9 @@ public class ConfigSetting : ISetting
                 ConfigSettingType.Boolean => Convert.ChangeType(value.AsBool(), type, CultureInfo.InvariantCulture),
                 ConfigSettingType.Float => Convert.ChangeType(value.AsFloat(), type, CultureInfo.InvariantCulture),
                 ConfigSettingType.Integer => Convert.ChangeType(value.AsInt(), type, CultureInfo.InvariantCulture),
-                ConfigSettingType.String => Convert.ChangeType(value.AsString(""), type, CultureInfo.InvariantCulture),
-                ConfigSettingType.Color => Convert.ChangeType(value.AsString(""), type, CultureInfo.InvariantCulture),
-                ConfigSettingType.Other => value.ToAttribute(),
+                ConfigSettingType.String => FromString(value.AsString(""), type),
+                ConfigSettingType.Color => FromString(value.AsString(""), type),
+                ConfigSettingType.Other => Structured(value, type),
                 _ => null
             };
         }
@@ -240,6 +253,67 @@ public class ConfigSetting : ISetting
             // A config class can declare a type the setting simply cannot become. Skipping
             // that one member is right; taking down the registration is not.
             return null;
+        }
+    }
+
+    /// <summary>
+    /// A string setting whose member is not a string. AssetLocation and friends carry a
+    /// TypeConverter and are stored as their string form, and Convert.ChangeType cannot build
+    /// one because they are not IConvertible.
+    /// </summary>
+    private static object? FromString(string text, Type type)
+    {
+        if (type == typeof(string)) return text;
+
+        TypeConverter converter = TypeDescriptor.GetConverter(type);
+        if (converter.CanConvertFrom(typeof(string)))
+        {
+            return converter.ConvertFromInvariantString(text);
+        }
+
+        return Convert.ChangeType(text, type, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// A whole subtree - a dictionary, a list, or anything else with no editor of its own.
+    /// Newtonsoft builds whatever the member declared, which is what makes a
+    /// Dictionary&lt;AssetLocation, T&gt; or a Dictionary&lt;string, JToken&gt; work without
+    /// this library knowing anything about either.
+    /// </summary>
+    private object? Structured(JsonObject value, Type type)
+    {
+        // JsonObject's own conversion, for the members that actually want game attributes.
+        if (typeof(ITreeAttribute).IsAssignableFrom(type)) return value.ToAttribute();
+
+        return value.Token?.ToObject(type);
+    }
+
+    /// <summary>
+    /// Fills a collection the member will not let us replace - <c>public List&lt;string&gt; X
+    /// { get; } = new();</c> is a common shape, and assignment simply cannot reach it. Clearing
+    /// and refilling also keeps any reference the mod already took to the collection live.
+    /// </summary>
+    private bool FillInPlace(object? existing)
+    {
+        if (existing == null) return false;
+
+        object? fresh = Value.Token?.ToObject(existing.GetType());
+        if (fresh == null) return false;
+
+        switch (existing)
+        {
+            case System.Collections.IDictionary target when fresh is System.Collections.IDictionary source:
+                target.Clear();
+                foreach (System.Collections.DictionaryEntry entry in source) target[entry.Key] = entry.Value;
+                return true;
+
+            case System.Collections.IList target when fresh is System.Collections.IList source:
+                target.Clear();
+                foreach (object? item in source) target.Add(item);
+                return true;
+
+            default:
+                return false;
         }
     }
 

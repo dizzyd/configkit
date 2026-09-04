@@ -75,6 +75,13 @@ internal sealed class SchemaNode
     public SchemaNode? ElementNode;             // List
     public string? DeadReason;                  // Dead
 
+    /// <summary>
+    /// True when this node becomes a setting of its own. An object contributes a heading and a
+    /// path prefix but no setting; a dead node cannot be persisted at all.
+    /// </summary>
+    public bool IsSetting => Kind is SchemaKind.Scalar or SchemaKind.Dictionary
+                                  or SchemaKind.List or SchemaKind.Opaque;
+
     public override string ToString() => $"{Path} : {Kind}";
 }
 
@@ -340,6 +347,17 @@ internal static class SchemaBuilder
             return;
         }
 
+        // A type with a real TypeConverter both ways is written by Newtonsoft as a plain
+        // string, not as an object with fields - AssetLocation serialises as "game:door-oak".
+        // Classifying it as a nested object would flatten it into Domain and Path and break
+        // the round trip. Verified against the shipped assembly, not assumed.
+        if (ConvertsToAndFromString(type))
+        {
+            node.Kind = SchemaKind.Scalar;
+            node.ScalarType = ConfigSettingType.String;
+            return;
+        }
+
         if (type.IsClass || (type.IsValueType && !type.IsPrimitive))
         {
             BuildObject(node, type, visiting, depth, notices);
@@ -522,6 +540,27 @@ internal static class SchemaBuilder
         }
 
         return ConfigSettingType.None;
+    }
+
+    /// <summary>
+    /// True when the type carries a TypeConverter that goes both ways to string. The base
+    /// TypeConverter answers true to CanConvertTo(string) for everything, so it is the
+    /// CanConvertFrom half that makes this mean anything - and it is the same test Newtonsoft
+    /// uses to decide to write the value as a string.
+    /// </summary>
+    private static bool ConvertsToAndFromString(Type type)
+    {
+        if (type == typeof(object)) return false;
+
+        try
+        {
+            TypeConverter converter = TypeDescriptor.GetConverter(type);
+            return converter.CanConvertTo(typeof(string)) && converter.CanConvertFrom(typeof(string));
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private static Type? ClosedInterface(Type type, Type openInterface)

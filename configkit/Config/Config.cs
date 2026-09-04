@@ -634,7 +634,7 @@ public sealed class Config : IConfig, IDisposable
         if (_schema == null) return;
 
         _nodesByPath = _schema.Walk()
-            .Where(node => node.Kind == SchemaKind.Scalar)
+            .Where(node => node.IsSetting)
             .ToDictionary(node => node.Path, node => node);
 
         foreach ((string code, ConfigSetting setting) in settings)
@@ -723,9 +723,20 @@ public sealed class Config : IConfig, IDisposable
                     }
                     break;
 
-                // Containers and anything unclassifiable are reported through the schema's
-                // notices rather than emitted. They are not silent; they are just not yet
-                // editable.
+                case SchemaKind.Dictionary:
+                case SchemaKind.List:
+                case SchemaKind.Opaque:
+                    if (node.Section != section)
+                    {
+                        section = node.Section;
+                        AddSeparator(settings, section);
+                    }
+                    settings.Add(ContainerDefinition(node, owner, domain));
+                    break;
+
+                // A dead node cannot be persisted at all, so there is nothing to emit. It is
+                // reported through the schema's notices and the registration summary, which
+                // is the whole difference from the walk this replaced.
                 default:
                     break;
             }
@@ -733,7 +744,7 @@ public sealed class Config : IConfig, IDisposable
     }
 
     private static bool HasVisibleLeaf(SchemaNode node)
-        => node.Kind == SchemaKind.Scalar || (node.Kind == SchemaKind.Object && node.Children.Any(HasVisibleLeaf));
+        => node.IsSetting || (node.Kind == SchemaKind.Object && node.Children.Any(HasVisibleLeaf));
 
     private static void AddSeparator(JArray settings, string? title)
     {
@@ -816,6 +827,52 @@ public sealed class Config : IConfig, IDisposable
         }
 
         return definition;
+    }
+
+    /// <summary>
+    /// A container is one setting whose value is its whole subtree. The settings model already
+    /// carries arbitrary JSON - the packet sends the token as a string, and the file writes it
+    /// at a path - so nothing below this had to learn about dictionaries.
+    ///
+    /// The subtree is kept opaque deliberately: JsonObjectPath reads every path element as a
+    /// possible wildcard, range or condition, so a player-authored key like "game:door-*"
+    /// would be taken for a selector if entries became path segments of their own.
+    /// </summary>
+    private static JObject ContainerDefinition(SchemaNode node, object? owner, string domain)
+    {
+        JObject definition = [];
+
+        definition.Add("code", node.Path);
+        definition.Add("ingui", node.Label ?? $"{domain}:setting-{node.Code}");
+        definition.Add("type", "other");
+        definition.Add("default", ContainerDefault(node, owner));
+
+        if (node.Comment != null) definition.Add("comment", node.Comment);
+        if (node.ClientSide) definition.Add("clientSide", true);
+        if (node.Hidden) definition.Add("hide", true);
+
+        return definition;
+    }
+
+    private static JToken ContainerDefault(SchemaNode node, object? owner)
+    {
+        object? value = owner == null
+            ? null
+            : (node.Member as PropertyInfo)?.GetValue(owner) ?? (node.Member as FieldInfo)?.GetValue(owner);
+
+        if (value != null)
+        {
+            try
+            {
+                return JToken.FromObject(value);
+            }
+            catch (Exception)
+            {
+                // Falls through to an empty container, which still round-trips.
+            }
+        }
+
+        return node.Kind == SchemaKind.List ? new JArray() : new JObject();
     }
 
     private static JValue GetDefaultValue(SchemaNode node, object? owner)
