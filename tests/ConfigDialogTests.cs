@@ -84,6 +84,48 @@ public class ConfigDialogTests
     }
 
     /// <summary>
+    /// A float rides the integer slider multiplied up, so the slider's own number is not the
+    /// setting's. Better Ruins showed 10000 on a slider whose readout said 100.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    [SingleplayerOnly]
+    public async Task ASliderReportsTheSettingsValueNotItsOwn()
+    {
+        await OnClient();
+
+        const string definition = @"{
+            ""version"": 1,
+            ""settings"": [
+                { ""type"": ""float"", ""code"": ""percent"", ""nameInGui"": ""Percent"",
+                  ""default"": 100, ""range"": { ""min"": 0, ""max"": 100 } },
+                { ""type"": ""float"", ""code"": ""narrow"", ""nameInGui"": ""Narrow"",
+                  ""default"": 1.5, ""range"": { ""min"": 0.5, ""max"": 4.0 } }
+            ]
+        }";
+
+        Config config = new(Capi, "sliders", "Sliders", new JsonObject(JToken.Parse(definition)));
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { ["sliders"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(8);
+
+        // What the player reads beside each slider.
+        Assert.Equal("100", dialog.SliderValueTexts["percent"]);
+        Assert.Equal("1.5", dialog.SliderValueTexts["narrow"]);
+
+        // A wide range is not worth hundredths: 0 to 100 at 100x is a ten thousand step
+        // slider that stores 43.27 when the player meant 43.
+        Assert.True(dialog.SliderStepsFor("percent") <= 2000,
+            $"a wide range kept absurd granularity: {dialog.SliderStepsFor("percent")} steps");
+
+        // A narrow one keeps them, because there it is the whole point.
+        Assert.True(dialog.SliderStepsFor("narrow") > 300,
+            $"a narrow range lost its precision: {dialog.SliderStepsFor("narrow")} steps");
+
+        dialog.TryClose();
+    }
+
+    /// <summary>
     /// The swatch is drawn from the hex string, so parsing is what decides whether a player
     /// sees their colour or a struck-through box.
     /// </summary>

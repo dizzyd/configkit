@@ -131,6 +131,22 @@ public class ConfigDialog : GuiDialog
             .ToDictionary(entry => _settingsByKey[entry.Key].YamlCode, entry => entry.Value.GetText());
 
     /// <summary>
+    /// How many steps a setting's slider has, which is what decides whether dragging it
+    /// lands on values a player meant.
+    /// </summary>
+    public int SliderStepsFor(string yamlCode)
+    {
+        foreach (ConfigSetting setting in _settingsByKey.Values)
+        {
+            if (setting.YamlCode != yamlCode || setting.Validation is not { Minimum: not null, Maximum: not null }) continue;
+
+            return ToSliderInt(setting, setting.Validation.Maximum) - ToSliderInt(setting, setting.Validation.Minimum);
+        }
+
+        return 0;
+    }
+
+    /// <summary>
     /// Restores one rendered setting to its default, exactly as that row's Reset button
     /// does. Returns false if the window is not showing a setting with that code.
     /// </summary>
@@ -940,12 +956,19 @@ public class ConfigDialog : GuiDialog
         GuiElementDynamicText readout = new(capi, NumberText(setting),
             CairoFont.WhiteDetailText().WithOrientation(EnumTextOrientation.Right), valueBounds);
 
-        Remember(key, container, new GuiElementSlider(capi, value =>
+        GuiElementSlider slider = new(capi, value =>
         {
             bool handled = OnSlider(setting, value);
             readout.SetNewText(NumberText(setting));
             return handled;
-        }, sliderBounds));
+        }, sliderBounds);
+
+        // The slider carries an integer, and a float setting rides it multiplied up - so
+        // left alone it shows its own number while the readout beside it shows the real
+        // one, and a value of 100 reads as 10000 the moment you grab the handle.
+        slider.OnSliderTooltip = value => SliderText(setting, value);
+
+        Remember(key, container, slider);
 
         _sliderValues[key] = readout;
         container.Add(readout);
@@ -1112,18 +1135,44 @@ public class ConfigDialog : GuiDialog
         }
     }
 
-    // Sliders are integer-only, so a float setting is carried at 100x and divided back.
+    // Sliders are integer-only, so a float setting is carried multiplied up and divided back.
     private const int FloatScale = 100;
+
+    /// <summary>
+    /// How far a float setting is multiplied to ride an integer slider. Hundredths are right
+    /// for the usual small range, and absurd for a wide one: a percentage from 0 to 100 became
+    /// a ten thousand step slider, which is forty units per pixel and stores 43.27 when the
+    /// player meant 43. Coarsen only once the step count stops meaning anything.
+    /// </summary>
+    private static int ScaleFor(ConfigSetting setting)
+    {
+        if (setting.SettingType != ConfigSettingType.Float) return 1;
+
+        Validation? validation = setting.Validation;
+        if (validation?.Minimum == null || validation.Maximum == null) return FloatScale;
+
+        float span = validation.Maximum.AsFloat() - validation.Minimum.AsFloat();
+        if (span <= 0) return FloatScale;
+
+        if (span * FloatScale <= 2000) return FloatScale;
+        return span * 10 <= 2000 ? 10 : 1;
+    }
+
+    /// <summary>The real value behind a slider position, as the readout beside it would write it.</summary>
+    private static string SliderText(ConfigSetting setting, int value)
+        => setting.SettingType == ConfigSettingType.Float
+            ? (value / (float)ScaleFor(setting)).ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static int ToSliderInt(ConfigSetting setting, JsonObject value)
         => setting.SettingType == ConfigSettingType.Float
-            ? (int)Math.Round(value.AsFloat() * FloatScale)
+            ? (int)Math.Round(value.AsFloat() * ScaleFor(setting))
             : value.AsInt();
 
     private static bool OnSlider(ConfigSetting setting, int value)
     {
         setting.Value = setting.SettingType == ConfigSettingType.Float
-            ? FromFloat(value / (float)FloatScale)
+            ? FromFloat(value / (float)ScaleFor(setting))
             : FromInt(value);
         return true;
     }
