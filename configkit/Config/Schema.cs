@@ -73,6 +73,8 @@ internal sealed class SchemaNode
     public SchemaNode? KeyNode;                 // Dictionary
     public SchemaNode? ValueNode;               // Dictionary
     public SchemaNode? ElementNode;             // List
+    /// <summary>Which member of a list element labels its row, from [Key] or the first string.</summary>
+    public string? LabelMember;                 // List
     public string? DeadReason;                  // Dead
 
     /// <summary>
@@ -382,6 +384,8 @@ internal static class SchemaBuilder
         if (kind == SchemaKind.Dictionary) node.ValueNode = value;
         else node.ElementNode = value;
 
+        node.LabelMember = LabelMemberOf(value);
+
         // A container whose contents we cannot describe is worse than useless as a structured
         // editor - it would offer an Add button that produces something unreadable. Fall back
         // to raw JSON, which at least round-trips.
@@ -390,6 +394,24 @@ internal static class SchemaBuilder
             node.Kind = SchemaKind.Opaque;
             notices.Add($"'{node.Path}' holds {Describe(valueType)}, which has no editor; it is stored and shown as raw JSON.");
         }
+    }
+
+    /// <summary>
+    /// Which member of a list element supplies the text on its row. [Key] says "this member
+    /// identifies the entity", which is exactly the question - and the fallbacks mean most
+    /// authors never have to answer it: the first string member usually is the name.
+    /// </summary>
+    private static string? LabelMemberOf(SchemaNode element)
+    {
+        if (element.Kind != SchemaKind.Object) return null;
+
+        SchemaNode? keyed = element.Children.FirstOrDefault(
+            child => child.Member?.GetCustomAttribute<KeyAttribute>() != null);
+        if (keyed != null) return keyed.Code;
+
+        return element.Children
+            .FirstOrDefault(child => child.Kind == SchemaKind.Scalar
+                                  && child.ScalarType == ConfigSettingType.String)?.Code;
     }
 
     private static SchemaNode Describe(Type type, string path, Stack<Type> visiting, int depth, List<string> notices)

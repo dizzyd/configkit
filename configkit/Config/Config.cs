@@ -148,6 +148,7 @@ public sealed class Config : IConfig, IDisposable
         _api = api;
         _domain = domain;
         _modName = modName;
+        _configObject = configObject;
         _json = DefinitionFromObject(configObject, domain);
         RelativeFilePath = file;
         ConfigFilePath = ConfigPathFor(_api, file);
@@ -195,6 +196,14 @@ public sealed class Config : IConfig, IDisposable
     internal string ModName => _modName;
     /// <summary>The shape of the registered settings object, or null for a definition-driven config.</summary>
     internal ConfigSchema? Schema => _schema;
+
+    /// <summary>
+    /// The schema node behind a setting, or null for a definition-driven config. The settings
+    /// screen needs it to tell a dictionary from a member it simply has no editor for - both
+    /// arrive as a subtree, and only one of them can be opened.
+    /// </summary>
+    internal SchemaNode? NodeFor(string code)
+        => _nodesByPath.TryGetValue(code, out SchemaNode? node) ? node : null;
 
     /// <summary>
     /// What ConfigKit made of the registered class, in one line: how many settings, sections
@@ -498,6 +507,8 @@ public sealed class Config : IConfig, IDisposable
     private readonly string _defaultJson = "{}";
     private readonly ConfigType _configType = ConfigType.YAML;
     private ConfigSchema? _schema;
+    /// <summary>The object a managed config was built from, kept so a change can reach it.</summary>
+    private readonly object? _configObject;
     private Dictionary<string, SchemaNode> _nodesByPath = [];
     private FileSystemWatcher? _configFileWatcher;
     private bool _disposedValue;
@@ -512,7 +523,16 @@ public sealed class Config : IConfig, IDisposable
     {
         foreach ((_, ConfigSetting? setting) in _settings)
         {
-            setting.SettingChanged += setting => SettingChanged?.Invoke(setting);
+            setting.SettingChanged += changed =>
+            {
+                // The config owns this. Leaving it to whoever registered the config meant
+                // anyone building one directly got a settings object that silently never
+                // updated - and it has to happen before the event is raised, so a subscriber
+                // does not read a stale object.
+                if (_configObject != null) AssignSettingValue(_configObject, changed);
+
+                SettingChanged?.Invoke(changed);
+            };
         }
     }
     private void DistributeSettingsBySides(Dictionary<string, ConfigSetting> serverSideSettings)
@@ -684,67 +704,72 @@ public sealed class Config : IConfig, IDisposable
             }
         }
 
-        EmitSettings(_schema!.Nodes, configObject, settings, domain, section: null);
+        EmitAll(_schema!, configObject, settings, domain);
 
         return new JsonObject(root);
     }
 
     /// <summary>
-    /// Walks the schema in order, emitting one setting block per scalar leaf and a separator
-    /// whenever the section changes. A nested object contributes no setting of its own - it
-    /// is a heading and a path prefix, and its leaves are ordinary settings with a path for a
-    /// code, so every control, validation and reset the flat case already had applies to them
-    /// unchanged.
+    /// Emits the whole schema as a settings definition: every scalar leaf and every container
+    /// gets one block, and each section gets a heading.
+    ///
+    /// Members belonging to no section come first, whatever order they were declared in.
+    /// Emitting strictly in declaration order looks more faithful and is wrong: a heading runs
+    /// until the next one, so every member declared after the first nested object was swallowed
+    /// into that object's section and disappeared with it when it folded.
     /// </summary>
-    private void EmitSettings(List<SchemaNode> nodes, object? owner, JArray settings, string domain, string? section)
+    private void EmitAll(ConfigSchema schema, object? root, JArray settings, string domain)
     {
-        foreach (SchemaNode node in nodes)
+        List<(SchemaNode node, object? owner)> flat = [];
+        Flatten(schema.Nodes, root, flat);
+
+        foreach ((SchemaNode node, object? owner) in flat.Where(entry => entry.node.Section == null))
         {
-            switch (node.Kind)
+            settings.Add(DefinitionFor(node, owner, domain));
+        }
+
+        IEnumerable<string> sections = flat
+            .Where(entry => entry.node.Section != null)
+            .Select(entry => entry.node.Section!)
+            .Distinct();
+
+        foreach (string section in sections)
+        {
+            AddSeparator(settings, section);
+
+            foreach ((SchemaNode node, object? owner) in flat.Where(entry => entry.node.Section == section))
             {
-                case SchemaKind.Scalar:
-                    if (node.Section != section)
-                    {
-                        section = node.Section;
-                        AddSeparator(settings, section);
-                    }
-                    settings.Add(SettingDefinition(node, owner, domain));
-                    break;
-
-                case SchemaKind.Object:
-                    object? child = ResolveOwner(node, owner);
-                    // Suppress a heading nothing lands under - containers do not become
-                    // settings yet, so an object holding only containers has no rows.
-                    if (node.Children.Any(HasVisibleLeaf))
-                    {
-                        section = SchemaBuilder.ChildSection(node);
-                        AddSeparator(settings, section);
-                        EmitSettings(node.Children, child, settings, domain, section);
-                    }
-                    break;
-
-                case SchemaKind.Dictionary:
-                case SchemaKind.List:
-                case SchemaKind.Opaque:
-                    if (node.Section != section)
-                    {
-                        section = node.Section;
-                        AddSeparator(settings, section);
-                    }
-                    settings.Add(ContainerDefinition(node, owner, domain));
-                    break;
-
-                // A dead node cannot be persisted at all, so there is nothing to emit. It is
-                // reported through the schema's notices and the registration summary, which
-                // is the whole difference from the walk this replaced.
-                default:
-                    break;
+                settings.Add(DefinitionFor(node, owner, domain));
             }
         }
     }
 
-    private static bool HasVisibleLeaf(SchemaNode node)
-        => node.IsSetting || (node.Kind == SchemaKind.Object && node.Children.Any(HasVisibleLeaf));
+    /// <summary>
+    /// Flattens the schema to the members that become settings, pairing each with the object
+    /// it lives on. A nested object contributes no setting of its own - it is a heading and a
+    /// path prefix, and its leaves are ordinary settings with a path for a code.
+    /// </summary>
+    private void Flatten(List<SchemaNode> nodes, object? owner, List<(SchemaNode, object?)> into)
+    {
+        foreach (SchemaNode node in nodes)
+        {
+            if (node.Kind == SchemaKind.Object)
+            {
+                Flatten(node.Children, ResolveOwner(node, owner), into);
+                continue;
+            }
+
+            // A dead node cannot be persisted at all, so there is nothing to emit. It is
+            // reported through the schema's notices and the registration summary, which is
+            // the whole difference from the walk this replaced.
+            if (node.IsSetting) into.Add((node, owner));
+        }
+    }
+
+    private static JObject DefinitionFor(SchemaNode node, object? owner, string domain)
+        => node.Kind == SchemaKind.Scalar
+            ? SettingDefinition(node, owner, domain)
+            : ContainerDefinition(node, owner, domain);
 
     private static void AddSeparator(JArray settings, string? title)
     {

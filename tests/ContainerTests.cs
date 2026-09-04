@@ -436,11 +436,22 @@ public class ContainerTests
 
         string[] rendered = dialog.RenderedSettings.Values.Select(setting => setting.YamlCode).ToArray();
 
-        foreach (string code in new[] { "Weights", "Nested", "Creatures", "Codes", "Rewards/Easy/Pool" })
+        // Members belonging to no section are always on screen, above the first heading.
+        foreach (string code in new[] { "Weights", "Nested", "Creatures", "Codes", "Required", "Blacklist" })
         {
             Assert.True(rendered.Contains(code),
                 $"'{code}' has no row; on screen: {string.Join(", ", rendered)}");
         }
+
+        // One inside a section appears when its section is unfolded, and not before.
+        Assert.False(rendered.Contains("Rewards/Easy/Pool"), "a folded section's row was drawn");
+
+        string section = dialog.Sections.First(title => title.Contains("Easy"));
+        dialog.ToggleSectionNamed(section);
+        await Frames.Wait(6);
+
+        Assert.True(dialog.RenderedSettings.Values.Any(setting => setting.YamlCode == "Rewards/Easy/Pool"),
+            "unfolding the section did not bring its row out");
 
         dialog.TryClose();
     }

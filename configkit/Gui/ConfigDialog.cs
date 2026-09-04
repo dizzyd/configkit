@@ -56,8 +56,36 @@ public class ConfigDialog : GuiDialog
     /// control for the setting, it only reports it.
     private readonly Dictionary<string, GuiElementDynamicText> _sliderValues = new();
 
+    private const double KeyWidth = 250;
+    private const double EntryValueWidth = 240;
+    private const double DeleteWidth = 28;
+    private const double EntryGap = 12;
+    private const double SectionHeight = 34;
+
     private ElementBounds? _contentBounds;
     private double _contentHeight;
+
+    /// The section currently unfolded. One at a time: a config with a dozen sub-objects is a
+    /// dozen headings and one body, rather than a screen the player has to hunt through.
+    private string? _openSection;
+
+    /// Set when the whole config fits without scrolling, in which case folding it would be
+    /// pure obstruction. Measured, not guessed - the layout pass already reports its height.
+    private bool _allOpen;
+
+    /// The container the player has opened, and the containers above it. Empty is the root
+    /// screen. Recursion here is a stack of screens rather than a recursive layout, which is
+    /// why a dictionary of dictionaries needs no code of its own.
+    private readonly List<ContainerFrame> _stack = new();
+
+    private string _filter = "";
+
+    /// "Restore defaults" throws away the whole mod's settings and is a click away from a
+    /// row three levels down, so it asks once.
+    private bool _confirmDefaults;
+
+    /// Widgets whose value can only be pushed in once the composer has built them.
+    private readonly List<Action> _afterCompose = new();
 
     public ConfigDialog(ICoreClientAPI capi, Dictionary<string, Config> configs) : base(capi)
     {
@@ -101,6 +129,136 @@ public class ConfigDialog : GuiDialog
         return false;
     }
 
+    /// <summary>
+    /// The container screens currently open, outermost first. Empty on the root screen.
+    /// </summary>
+    public IReadOnlyList<string> OpenPath => _stack.Select(frame => frame.Crumb).ToList();
+
+    /// <summary>
+    /// The section headings on the root screen, in the order they are drawn. A section under a
+    /// nested object carries its whole path - "Rewards › Easy" - so a leaf three classes down
+    /// still says where it came from.
+    /// </summary>
+    public IReadOnlyList<string> Sections
+        => _stack.Count > 0
+            ? []
+            : _configs[_domain].ConfigBlocks.Values
+                .OfType<IFormattingBlock>()
+                .Where(block => block.Title != null)
+                .Select(block => block.Title)
+                .ToList();
+
+    /// <summary>The unfolded section, or null when none is - or when they are all shown.</summary>
+    public string? OpenSection => _allOpen ? null : _openSection;
+
+    /// <summary>True when the whole config fitted, so nothing is folded away.</summary>
+    public bool EverythingShown => _allOpen;
+
+    /// <summary>The entry labels on the container screen, in the order they are drawn.</summary>
+    public IReadOnlyList<string> EntryLabels
+    {
+        get
+        {
+            if (_stack.Count == 0) return [];
+
+            ContainerFrame frame = _stack[^1];
+            JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
+
+            return Entries(token, frame.Node)
+                .Select(entry => entry.label)
+                .Where(label => _filter.Length == 0 || label.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+    }
+
+    /// <summary>Whether a new entry can be added here, and if not, why not.</summary>
+    public bool CanAddEntry(out string reason)
+    {
+        reason = "";
+        if (_stack.Count == 0) return false;
+
+        ContainerFrame frame = _stack[^1];
+        if (frame.Locked) { reason = "the server owns this setting"; return false; }
+        if (frame.Node.Kind != SchemaKind.Dictionary) return true;
+
+        JObject existing = Subtree.Navigate(frame.Setting.Value.Token, frame.Path) as JObject ?? new JObject();
+        return KeyGenerator.TryGenerate(existing, frame.Node.KeyNode, out _, out reason);
+    }
+
+    /// <summary>
+    /// Opens a container setting's screen, exactly as its row's button does. False if that
+    /// setting is not on screen or is not something that can be opened.
+    /// </summary>
+    public bool OpenSetting(string yamlCode)
+    {
+        Config config = _configs[_domain];
+        SchemaNode? node = config.NodeFor(yamlCode);
+        if (node == null || (node.Kind != SchemaKind.Dictionary && node.Kind != SchemaKind.List)) return false;
+
+        if (config.GetSetting(yamlCode) is not ConfigSetting setting) return false;
+
+        return OpenContainer(setting, node, yamlCode, IsServerControlled(setting));
+    }
+
+    /// <summary>Opens the entry with this label, for a value that is itself a container or an object.</summary>
+    public bool OpenEntry(string label)
+    {
+        if (_stack.Count == 0) return false;
+
+        ContainerFrame frame = _stack[^1];
+        SchemaNode? schema = frame.Node.Kind == SchemaKind.Dictionary ? frame.Node.ValueNode : frame.Node.ElementNode;
+        if (schema == null || schema.Kind is not (SchemaKind.Object or SchemaKind.Dictionary or SchemaKind.List)) return false;
+
+        JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
+
+        foreach ((object step, string entryLabel, JToken _) in Entries(token, frame.Node))
+        {
+            if (entryLabel != label) continue;
+
+            return OpenNested(frame, new List<object>(frame.Path) { step }, schema, label);
+        }
+
+        return false;
+    }
+
+    /// <summary>Goes up one container screen, as the Back button does.</summary>
+    public bool Back() => OnBack();
+
+    /// <summary>Adds an entry here, as the Add button does.</summary>
+    public bool AddEntry() => _stack.Count > 0 && CanAddEntry(out _) && OnAddEntry(_stack[^1]);
+
+    /// <summary>Removes the entry with this label, as its row's button does.</summary>
+    public bool RemoveEntry(string label)
+    {
+        if (_stack.Count == 0) return false;
+
+        ContainerFrame frame = _stack[^1];
+        JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
+
+        foreach ((object step, string entryLabel, JToken _) in Entries(token, frame.Node))
+        {
+            if (entryLabel == label) return OnRemoveEntry(frame, step);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Renames a key, as leaving its field does. False when the name is taken or blank - the
+    /// entry is left alone rather than merged away.
+    /// </summary>
+    public bool RenameEntry(string from, string to)
+    {
+        if (_stack.Count == 0) return false;
+
+        bool renamed = Subtree.Rename(_stack[^1].Setting, _stack[^1].Path, from, to);
+        Recompose();
+        return renamed;
+    }
+
+    /// <summary>Folds or unfolds a section, as clicking its heading does.</summary>
+    public bool ToggleSectionNamed(string title) => ToggleSection(title);
+
     public override void OnGuiOpened()
     {
         base.OnGuiOpened();
@@ -124,10 +282,25 @@ public class ConfigDialog : GuiDialog
         }
 
         _settingsByKey.Clear();
+        _afterCompose.Clear();
 
         // Lay the rows out once without a composer to learn how tall they are, so a mod
         // with three settings gets a short panel instead of half a screen of empty wood.
-        _contentHeight = LayoutRows(null, _configs[_domain]);
+        // The same pass decides whether the sections need folding at all: if everything
+        // fits, folding it would only hide things for no reason.
+        if (_stack.Count > 0)
+        {
+            _allOpen = false;
+            _contentHeight = LayoutEntries(null);
+        }
+        else
+        {
+            _allOpen = true;
+            double unfolded = LayoutRows(null, _configs[_domain]);
+            _allOpen = unfolded <= MaxContentHeight;
+            _contentHeight = _allOpen ? unfolded : LayoutRows(null, _configs[_domain]);
+        }
+
         double visibleHeight = Math.Clamp(_contentHeight, MinContentHeight, MaxContentHeight);
         bool needsScrollbar = _contentHeight > visibleHeight + 0.5;
 
@@ -151,14 +324,24 @@ public class ConfigDialog : GuiDialog
             .CreateCompo("configkit-settings", ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterMiddle))
             .AddShadedDialogBG(bgBounds)
             .AddDialogTitleBar("Mod settings", OnClose)
-            .BeginChildElements(bgBounds)
-                .AddDropDown(
-                    _domains.ToArray(),
-                    _domains.Select(DisplayName).ToArray(),
-                    Math.Max(0, _domains.IndexOf(_domain)),
-                    OnDomainSelected,
-                    dropdownBounds,
-                    "domain")
+            .BeginChildElements(bgBounds);
+
+        if (_stack.Count > 0)
+        {
+            AddContainerHeader(composer, dropdownBounds);
+        }
+        else
+        {
+            composer.AddDropDown(
+                _domains.ToArray(),
+                _domains.Select(DisplayName).ToArray(),
+                Math.Max(0, _domains.IndexOf(_domain)),
+                OnDomainSelected,
+                dropdownBounds,
+                "domain");
+        }
+
+        composer
                 .AddInset(insetBounds, 3)
                 .BeginClip(clipBounds);
 
@@ -171,7 +354,15 @@ public class ConfigDialog : GuiDialog
         // into the dialog's own surface, where a render-time clip never reaches them: with
         // more settings than fit, labels and empty switch frames drew over the buttons and
         // the hotbar while only the parts drawn per frame were correctly hidden.
-        LayoutRows(composer.GetContainer("rows"), _configs[_domain]);
+        if (_stack.Count > 0)
+        {
+            LayoutEntries(composer.GetContainer("rows"));
+        }
+        else
+        {
+            LayoutRows(composer.GetContainer("rows"), _configs[_domain]);
+        }
+
         _contentBounds.fixedHeight = _contentHeight;
 
         composer
@@ -180,13 +371,19 @@ public class ConfigDialog : GuiDialog
         // A scrollbar over content that already fits tells the player there is more to see.
         if (needsScrollbar) composer.AddVerticalScrollbar(OnScroll, scrollbarBounds, "scrollbar");
 
+        // The same three buttons at every depth, acting on the whole config. Swapping them
+        // for a Back button inside a container would make Save look like it saved only what
+        // is on screen.
         composer
             .AddSmallButton("Save", OnSave, saveBounds, EnumButtonStyle.Normal)
             .AddSmallButton("Reload", OnReload, reloadBounds, EnumButtonStyle.Normal)
-            .AddSmallButton("Restore defaults", OnDefaults, defaultsBounds, EnumButtonStyle.Normal)
+            .AddSmallButton(_confirmDefaults ? "Sure? Click again" : "Restore defaults",
+                OnDefaults, defaultsBounds, EnumButtonStyle.Normal)
             .EndChildElements();
 
         SingleComposer = composer.Compose();
+
+        foreach (Action action in _afterCompose) action();
 
         if (needsScrollbar)
         {
@@ -225,15 +422,30 @@ public class ConfigDialog : GuiDialog
 
         if (container != null) { _widgets.Clear(); _sliderValues.Clear(); }
 
+        // A heading and everything under it, until the next heading. Rows before the first
+        // heading belong to no section and are always shown - they are the config's own
+        // top level members, and hiding those behind a fold would be perverse.
+        string? section = null;
+        bool sectionOpen = true;
+
         foreach ((float _, IConfigBlock block) in config.ConfigBlocks)
         {
             if (block is IFormattingBlock formatting)
             {
+                if (formatting.Title != null)
+                {
+                    section = formatting.Title;
+                    sectionOpen = _allOpen || section == _openSection;
+                    y = AddSectionHeader(container, section, sectionOpen, y);
+                    continue;
+                }
+
                 y = AddFormattingBlock(container, formatting, y);
                 continue;
             }
 
             if (block is not ConfigSetting setting || setting.Hide) continue;
+            if (!sectionOpen) continue;
 
             string key = $"setting-{index++}";
             if (container == null)
@@ -243,7 +455,11 @@ public class ConfigDialog : GuiDialog
             }
 
             bool locked = IsServerControlled(setting);
-            if (!locked) _settingsByKey[key] = setting;
+            SchemaNode? node = config.NodeFor(setting.YamlCode);
+            bool container_ = node != null && (node.Kind == SchemaKind.Dictionary || node.Kind == SchemaKind.List);
+
+            if (!locked && !container_) _settingsByKey[key] = setting;
+            if (container_) _settingsByKey[key] = setting;
 
             ElementBounds labelBounds = ElementBounds.Fixed(0, y + 4, LabelWidth, RowHeight);
             ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
@@ -259,7 +475,20 @@ public class ConfigDialog : GuiDialog
                     CairoFont.WhiteDetailText(), 320, labelBounds.FlatCopy()));
             }
 
-            if (locked)
+            if (container_)
+            {
+                // One row, whatever is inside it. A dictionary's contents are unbounded and
+                // its entries need a different set of columns than a setting row has.
+                ConfigSetting owner = setting;
+                SchemaNode owned = node!;
+                container.Add(new GuiElementTextButton(capi, EntryCountText(setting) + "  \u2192",
+                    CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
+                    () => OpenContainer(owner, owned, LabelFor(setting), locked),
+                    controlBounds, EnumButtonStyle.Small));
+
+                if (!locked) AddResetButton(container, setting, y, key);
+            }
+            else if (locked)
             {
                 container.Add(new GuiElementDynamicText(capi, ValueText(setting),
                     CairoFont.WhiteDetailText(), controlBounds));
@@ -274,6 +503,49 @@ public class ConfigDialog : GuiDialog
         }
 
         return y;
+    }
+
+    /// <summary>A foldable heading. Opening one closes whichever was open before it.</summary>
+    private double AddSectionHeader(GuiElementContainer? container, string title, bool open, double y)
+    {
+        if (container != null)
+        {
+            string label = (open ? "\u25bc  " : "\u25b6  ") + title;
+            // A minimum, so a two word heading is not a tiny button beside a long one.
+            double width = Math.Clamp(44 + label.Length * 8.5, 150, DialogWidth - 40);
+
+            container.Add(new GuiElementTextButton(capi, label,
+                CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
+                () => ToggleSection(title),
+                ElementBounds.Fixed(0, y + 4, width, 26), EnumButtonStyle.Small));
+        }
+
+        return y + SectionHeight;
+    }
+
+    private bool ToggleSection(string title)
+    {
+        _openSection = _openSection == title ? null : title;
+        Recompose();
+        return true;
+    }
+
+    /// <summary>"12 entries", or "empty" - the count is the useful thing on a closed row.</summary>
+    private static string EntryCountText(ConfigSetting setting)
+    {
+        int count = setting.Value.Token switch
+        {
+            JObject o => o.Count,
+            JArray a => a.Count,
+            _ => 0
+        };
+
+        return count switch
+        {
+            0 => "empty",
+            1 => "1 entry",
+            _ => $"{count} entries"
+        };
     }
 
     private double AddFormattingBlock(GuiElementContainer? container, IFormattingBlock block, double y)
@@ -711,6 +983,366 @@ public class ConfigDialog : GuiDialog
     private static JsonObject FromFloat(float value) => new(new JValue(value));
     private static JsonObject FromString(string value) => new(new JValue(value));
 
+    // ------------------------------------------------------------------ container screens
+
+    /// <summary>
+    /// Header for a container screen: where you are, the way back, and a filter. A
+    /// dictionary keyed by block code routinely runs to hundreds of entries, so the filter
+    /// is not a refinement.
+    /// </summary>
+    private void AddContainerHeader(GuiComposer composer, ElementBounds row)
+    {
+        composer.AddSmallButton("Back", OnBack, ElementBounds.Fixed(0, row.fixedY, 70, 28), EnumButtonStyle.Small);
+
+        composer.AddStaticText(Breadcrumb(), CairoFont.WhiteDetailText(),
+            ElementBounds.Fixed(80, row.fixedY + 4, DialogWidth - 320, 26));
+
+        // Committed rather than live: recomposing on every keystroke takes the focus off the
+        // field the player is typing into.
+        CommittingTextInput filter = new(capi,
+            ElementBounds.Fixed(DialogWidth - 230, row.fixedY, 230, 28),
+            text => { _filter = text.Trim(); Recompose(); },
+            CairoFont.WhiteDetailText());
+
+        filter.SetPlaceHolderText("filter");
+        composer.AddInteractiveElement(filter, "filter");
+        _afterCompose.Add(() => filter.SetValue(_filter));
+    }
+
+    private string Breadcrumb()
+        => string.Join("  ›  ", new[] { DisplayName(_domain) }.Concat(_stack.Select(frame => frame.Crumb)));
+
+    /// <summary>
+    /// One row per entry: its key, its value, and a way to remove it. A value that is itself
+    /// a container or an object opens another screen, which is what makes a dictionary of
+    /// dictionaries cost nothing - it is this method again, one level down.
+    /// </summary>
+    private double LayoutEntries(GuiElementContainer? container)
+    {
+        ContainerFrame frame = _stack[^1];
+        double y = 4;
+        int index = 0;
+
+        if (container != null) { _widgets.Clear(); _sliderValues.Clear(); }
+
+        JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
+        SchemaNode? valueSchema = frame.Node.Kind == SchemaKind.Dictionary ? frame.Node.ValueNode : frame.Node.ElementNode;
+
+        foreach ((object step, string label, JToken value) in Entries(token, frame.Node))
+        {
+            if (_filter.Length > 0 && !label.Contains(_filter, StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (container == null)
+            {
+                y += RowHeight + RowGap;
+                index++;
+                continue;
+            }
+
+            string key = $"entry-{index++}";
+
+            ElementBounds keyBounds = ElementBounds.Fixed(0, y, KeyWidth, RowHeight - 4);
+            ElementBounds valueBounds = ElementBounds.Fixed(KeyWidth + EntryGap, y, EntryValueWidth, RowHeight - 4);
+            ElementBounds deleteBounds = ElementBounds.Fixed(
+                KeyWidth + EntryGap + EntryValueWidth + EntryGap, y, DeleteWidth, RowHeight - 4);
+
+            AddEntryKey(container, frame, step, label, keyBounds);
+            AddEntryValue(container, frame, step, label, value, valueSchema, valueBounds, key);
+
+            if (!frame.Locked)
+            {
+                object removed = step;
+                container.Add(new GuiElementTextButton(capi, "x",
+                    CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
+                    () => OnRemoveEntry(frame, removed),
+                    deleteBounds, EnumButtonStyle.Small));
+            }
+
+            y += RowHeight + RowGap;
+        }
+
+        y += 6;
+
+        if (container != null && !frame.Locked)
+        {
+            AddAddButton(container, frame, token, y);
+        }
+
+        return y + RowHeight;
+    }
+
+    private static IEnumerable<(object step, string label, JToken value)> Entries(JToken? token, SchemaNode node)
+    {
+        switch (token)
+        {
+            case JObject o:
+                foreach (JProperty property in o.Properties())
+                {
+                    yield return (property.Name, property.Name, property.Value);
+                }
+                break;
+
+            case JArray array:
+                for (int index = 0; index < array.Count; index++)
+                {
+                    yield return (index, ElementLabel(array[index], index, node.LabelMember), array[index]);
+                }
+                break;
+        }
+    }
+
+    /// <summary>
+    /// What a list row says. Falls back through the element's [Key] member, then its first
+    /// string, then the index - so an author annotates only when the guess is wrong.
+    /// </summary>
+    private static string ElementLabel(JToken value, int index, string? labelMember)
+    {
+        if (labelMember != null && value is JObject o && o[labelMember] is JToken label)
+        {
+            string text = label.ToString();
+            if (!string.IsNullOrWhiteSpace(text)) return text;
+        }
+
+        return $"#{index}";
+    }
+
+    private void AddEntryKey(GuiElementContainer container, ContainerFrame frame, object step, string label, ElementBounds bounds)
+    {
+        // A list index is not editable, and neither is anything on a server-owned config.
+        if (frame.Locked || step is not string existing)
+        {
+            container.Add(new GuiElementDynamicText(capi, label, CairoFont.WhiteDetailText(), bounds));
+            return;
+        }
+
+        CommittingTextInput input = new(capi, bounds,
+            text => OnRenameKey(frame, existing, text.Trim()),
+            CairoFont.WhiteDetailText());
+
+        container.Add(input);
+        _afterCompose.Add(() => input.SetValue(existing));
+    }
+
+    private void AddEntryValue(GuiElementContainer container, ContainerFrame frame, object step, string label,
+        JToken value, SchemaNode? schema, ElementBounds bounds, string key)
+    {
+        bool opens = schema != null
+            && schema.Kind is SchemaKind.Object or SchemaKind.Dictionary or SchemaKind.List;
+
+        if (opens)
+        {
+            List<object> path = new(frame.Path) { step };
+            container.Add(new GuiElementTextButton(capi, NestedButtonText(value, schema!) + "  →",
+                CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
+                () => OpenNested(frame, path, schema!, label),
+                bounds, EnumButtonStyle.Small));
+            return;
+        }
+
+        if (frame.Locked || schema == null)
+        {
+            container.Add(new GuiElementDynamicText(capi, value.ToString(), CairoFont.WhiteDetailText(), bounds));
+            return;
+        }
+
+        AddEntryControl(container, frame, step, value, schema, bounds, key);
+    }
+
+    private static string NestedButtonText(JToken value, SchemaNode schema) => schema.Kind switch
+    {
+        SchemaKind.Object => "edit",
+        _ => value switch
+        {
+            JObject o => o.Count == 1 ? "1 entry" : $"{o.Count} entries",
+            JArray a => a.Count == 1 ? "1 entry" : $"{a.Count} entries",
+            _ => "empty"
+        }
+    };
+
+    /// <summary>A control for one scalar sitting inside a container, bound to its place in the subtree.</summary>
+    private void AddEntryControl(GuiElementContainer container, ContainerFrame frame, object step,
+        JToken value, SchemaNode schema, ElementBounds bounds, string key)
+    {
+        Type type = Nullable.GetUnderlyingType(schema.MemberType) ?? schema.MemberType;
+
+        if (type.IsEnum)
+        {
+            string[] names = Enum.GetNames(type);
+            int selected = Math.Max(0, Array.IndexOf(names, value.ToString()));
+
+            Remember(key, container, new GuiElementDropDown(capi, names, names, selected,
+                (code, on) => { if (on) Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(code)); },
+                bounds, CairoFont.WhiteDetailText(), false));
+            return;
+        }
+
+        switch (schema.ScalarType)
+        {
+            case ConfigSettingType.Boolean:
+            {
+                GuiElementSwitch toggle = new(capi,
+                    on => Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(on)), bounds);
+                Remember(key, container, toggle);
+                bool on = value.Type == JTokenType.Boolean && value.Value<bool>();
+                _afterCompose.Add(() => toggle.On = on);
+                break;
+            }
+
+            case ConfigSettingType.Integer:
+            case ConfigSettingType.Float:
+            {
+                bool wholeNumbers = schema.ScalarType == ConfigSettingType.Integer;
+                GuiElementNumberInput number = new(capi, bounds,
+                    text => OnEntryNumberTyped(frame, step, text, wholeNumbers), CairoFont.WhiteDetailText());
+                Remember(key, container, number);
+                string text = value.ToString();
+                _afterCompose.Add(() => number.SetValue(text));
+                break;
+            }
+
+            default:
+            {
+                GuiElementTextInput input = new(capi, bounds,
+                    text => Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(text)),
+                    CairoFont.WhiteDetailText());
+                Remember(key, container, input);
+                string text = value.Type == JTokenType.String ? value.Value<string>() ?? "" : value.ToString();
+                _afterCompose.Add(() => input.SetValue(text));
+                break;
+            }
+        }
+    }
+
+    private static void OnEntryNumberTyped(ContainerFrame frame, object step, string text, bool wholeNumbers)
+    {
+        if (wholeNumbers)
+        {
+            if (int.TryParse(text, out int parsed)) Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(parsed));
+            return;
+        }
+
+        if (float.TryParse(text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float value))
+        {
+            Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(value));
+        }
+    }
+
+    /// <summary>
+    /// Add, or a line saying why not. A dictionary keyed by a three member enum that already
+    /// holds three entries has nowhere to put a fourth, and a button that silently does
+    /// nothing is the worst of the available answers.
+    /// </summary>
+    private void AddAddButton(GuiElementContainer container, ContainerFrame frame, JToken? token, double y)
+    {
+        ElementBounds bounds = ElementBounds.Fixed(0, y, 150, RowHeight - 4);
+
+        if (frame.Node.Kind == SchemaKind.Dictionary)
+        {
+            JObject existing = token as JObject ?? new JObject();
+
+            if (!KeyGenerator.TryGenerate(existing, frame.Node.KeyNode, out _, out string reason))
+            {
+                container.Add(new GuiElementDynamicText(capi, $"Cannot add: {reason}",
+                    CairoFont.WhiteDetailText().WithColor(GuiStyle.ColorParchment),
+                    ElementBounds.Fixed(0, y + 4, DialogWidth - 40, RowHeight)));
+                return;
+            }
+        }
+
+        container.Add(new GuiElementTextButton(capi, "+ Add entry",
+            CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
+            () => OnAddEntry(frame), bounds, EnumButtonStyle.Small));
+    }
+
+    // ------------------------------------------------------------------ container actions
+
+    private bool OpenContainer(ConfigSetting setting, SchemaNode node, string crumb, bool locked)
+    {
+        _stack.Add(new ContainerFrame
+        {
+            Setting = setting,
+            Node = node,
+            Path = new List<object>(),
+            Crumb = crumb,
+            Locked = locked
+        });
+
+        _filter = "";
+        Recompose();
+        return true;
+    }
+
+    private bool OpenNested(ContainerFrame frame, List<object> path, SchemaNode node, string crumb)
+    {
+        _stack.Add(new ContainerFrame
+        {
+            Setting = frame.Setting,
+            Node = node,
+            Path = path,
+            Crumb = crumb,
+            Locked = frame.Locked
+        });
+
+        _filter = "";
+        Recompose();
+        return true;
+    }
+
+    private bool OnBack()
+    {
+        if (_stack.Count > 0) _stack.RemoveAt(_stack.Count - 1);
+        _filter = "";
+        Recompose();
+        return true;
+    }
+
+    private bool OnRemoveEntry(ContainerFrame frame, object step)
+    {
+        Subtree.Remove(frame.Setting, frame.Path, step);
+        Recompose();
+        return true;
+    }
+
+    private bool OnAddEntry(ContainerFrame frame)
+    {
+        JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
+        SchemaNode? valueSchema = frame.Node.Kind == SchemaKind.Dictionary ? frame.Node.ValueNode : frame.Node.ElementNode;
+
+        string? key = null;
+        if (frame.Node.Kind == SchemaKind.Dictionary)
+        {
+            JObject existing = token as JObject ?? new JObject();
+            if (!KeyGenerator.TryGenerate(existing, frame.Node.KeyNode, out key, out _)) return true;
+        }
+
+        Subtree.Add(frame.Setting, frame.Path, key, KeyGenerator.BlankValue(valueSchema));
+        Recompose();
+        return true;
+    }
+
+    private void OnRenameKey(ContainerFrame frame, string from, string to)
+    {
+        if (from == to) return;
+
+        if (!Subtree.Rename(frame.Setting, frame.Path, from, to))
+        {
+            capi.TriggerIngameError(this, "duplicate-key",
+                string.IsNullOrWhiteSpace(to)
+                    ? "A key cannot be blank."
+                    : $"There is already an entry called '{to}'.");
+        }
+
+        Recompose();
+    }
+
+    /// <summary>Rebuild the screen and push current values back into it.</summary>
+    private void Recompose()
+    {
+        Compose();
+        LoadControlValues();
+    }
+
     // ------------------------------------------------------------------ actions
 
     private void OnDomainSelected(string domain, bool selected)
@@ -718,8 +1350,11 @@ public class ConfigDialog : GuiDialog
         if (!selected || domain == _domain) return;
 
         _domain = domain;
-        Compose();
-        LoadControlValues();
+        _stack.Clear();
+        _openSection = null;
+        _filter = "";
+        _confirmDefaults = false;
+        Recompose();
     }
 
     private void OnScroll(float value)
@@ -732,6 +1367,7 @@ public class ConfigDialog : GuiDialog
 
     private bool OnSave()
     {
+        _confirmDefaults = false;
         _configs[_domain].WriteToFile();
         capi.TriggerIngameError(this, "saved", $"Saved settings for {DisplayName(_domain)}.");
         return true;
@@ -740,16 +1376,28 @@ public class ConfigDialog : GuiDialog
     private bool OnReload()
     {
         _configs[_domain].ReadFromFile();
-        Compose();
-        LoadControlValues();
+        _confirmDefaults = false;
+        Recompose();
         return true;
     }
 
+    /// <summary>
+    /// Throws away every setting for this mod, from wherever the player happens to be
+    /// standing - so it asks first. Two clicks, not a modal: a modal over a modal in this
+    /// GUI is more trouble than the confirmation is worth.
+    /// </summary>
     private bool OnDefaults()
     {
+        if (!_confirmDefaults)
+        {
+            _confirmDefaults = true;
+            Recompose();
+            return true;
+        }
+
+        _confirmDefaults = false;
         _configs[_domain].RestoreToDefaults();
-        Compose();
-        LoadControlValues();
+        Recompose();
         return true;
     }
 

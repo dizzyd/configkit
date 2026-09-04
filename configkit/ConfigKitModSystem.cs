@@ -72,13 +72,9 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         }
 
         config.SettingChanged += setting => SettingChanged?.Invoke(domain, config, setting);
-        config.SettingChanged += setting =>
-        {
-            // Through the config, not the setting: a nested setting's code is a JSON path,
-            // and only the schema knows which member of which sub-object it came from.
-            if (setting is ConfigSetting concrete) config.AssignSettingValue(configObject, concrete);
-            onSettingChanged?.Invoke(setting.YamlCode);
-        };
+        // The config assigns onto the object itself now, before it raises this - so by the
+        // time the mod's callback runs, its own settings object already holds the new value.
+        config.SettingChanged += setting => onSettingChanged?.Invoke(setting.YamlCode);
 
         // The constructor has already read the file, and SettingChanged is only subscribed
         // above - after the fact - so nothing has pushed those values onto the caller's
