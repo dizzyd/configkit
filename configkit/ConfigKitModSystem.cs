@@ -44,6 +44,19 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
 
         Config config = new(_api, domain, _api.ModLoader.GetMod(domain)?.Info.Name ?? Lang.Get(domain), configObject, path ?? domain + ".json");
 
+        // Say what was registered, and say what was not. The old reflection walk dropped
+        // every member it could not classify with no row, no key and no log line, so a mod
+        // with a dictionary in its config looked like it had simply lost it.
+        if (config.Schema is { } schema)
+        {
+            LoggerUtil.Notify(_api, this, $"Registered '{domain}': {schema.Summary()}.");
+
+            foreach (string notice in schema.Notices)
+            {
+                LoggerUtil.Notify(_api, this, $"({domain}) {notice}");
+            }
+        }
+
         _configs.Add(domain, config);
         _domains.Add(domain);
         _configsToRegister.Add(domain, config);
@@ -61,7 +74,9 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         config.SettingChanged += setting => SettingChanged?.Invoke(domain, config, setting);
         config.SettingChanged += setting =>
         {
-            setting.AssignSettingValue(configObject);
+            // Through the config, not the setting: a nested setting's code is a JSON path,
+            // and only the schema knows which member of which sub-object it came from.
+            if (setting is ConfigSetting concrete) config.AssignSettingValue(configObject, concrete);
             onSettingChanged?.Invoke(setting.YamlCode);
         };
 

@@ -56,6 +56,13 @@ public class ConfigSetting : ISetting
         }
     }
     public string? Comment { get; internal set; }
+    /// <summary>
+    /// Codes this setting also answers to when reading a file, and never writes. A member
+    /// renamed - by [JsonProperty], or by the author - has its old name sitting in every
+    /// existing config file, and re-keying without reading the old one back would silently
+    /// reset the value to its default with nothing in the log to say so.
+    /// </summary>
+    public IReadOnlyList<string> LegacyCodes { get; internal set; } = [];
     public Validation? Validation { get; internal set; }
     public float SortingWeight { get; internal set; }
     public string? InGui { get; internal set; }
@@ -105,7 +112,21 @@ public class ConfigSetting : ISetting
         SettingChanged = previous.SettingChanged;
         Hide = previous.Hide;
         Link = previous.Link;
+        LegacyCodes = previous.LegacyCodes;
     }
+
+    /// <summary>
+    /// Assigns this setting's value to one specific member of one specific object, rather
+    /// than searching a type for a member whose name matches the code. A flattened config
+    /// has codes like "Thirst/HungerRate", which match no member name anywhere - the schema
+    /// knows which member each setting came from, so it does not have to guess.
+    /// </summary>
+    internal bool AssignTo(object owner, MemberInfo member) => member switch
+    {
+        PropertyInfo property => AssignSettingValue(owner, property),
+        FieldInfo field => AssignSettingValue(owner, field),
+        _ => false
+    };
 
     internal void Changed() => Debug.Write("");// SettingChanged?.Invoke(this);
     internal void SetValueFrom(ConfigSetting value)

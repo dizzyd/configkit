@@ -156,7 +156,12 @@ public sealed class Config : IConfig, IDisposable
 
         try
         {
-            ParseJson(_json, out _settings, out _configBlocks, out _defaultJson, domain);
+            // The author's own object, serialised, is the document written when no config
+            // file exists yet. It carries the exact nested shape - including every member
+            // that has no setting of its own - so a path like "Thirst/HungerRate" has
+            // something to be written into, and the file matches what the mod's own
+            // StoreModConfig would have produced.
+            ParseJson(_json, out _settings, out _configBlocks, out _defaultJson, domain, Skeleton(configObject));
             _clientSideSettings = new(_settings);   // a copy: aliasing lets Clear() empty _settings
             _patches = new(api, this);
             WriteToFile();
@@ -174,7 +179,13 @@ public sealed class Config : IConfig, IDisposable
     }
 
     internal void Apply() => _patches.Apply();
-    internal JsonObject Definition => _json;
+
+    /// <summary>
+    /// The settings definition this config was built from. For a managed config this is what
+    /// ConfigKit made of the registered class, which is the first thing worth looking at when
+    /// a setting does not appear where its author expected.
+    /// </summary>
+    public JsonObject Definition => _json;
     internal SortedDictionary<float, IConfigBlock> ConfigBlocks => _configBlocks;
     internal Dictionary<string, ConfigSetting> Settings => _settings;
     internal ConfigType FileType => _configType;
@@ -182,6 +193,22 @@ public sealed class Config : IConfig, IDisposable
     internal string RelativeFilePath { get; } = "";
     internal string Domain => _domain;
     internal string ModName => _modName;
+    /// <summary>The shape of the registered settings object, or null for a definition-driven config.</summary>
+    internal ConfigSchema? Schema => _schema;
+
+    /// <summary>
+    /// What ConfigKit made of the registered class, in one line: how many settings, sections
+    /// and containers it found, and how many members it could not make editable. Empty for a
+    /// definition-driven config.
+    /// </summary>
+    public string SchemaSummary => _schema?.Summary() ?? "";
+
+    /// <summary>
+    /// Every member that is not an ordinary editable setting, and why. The rule this serves is
+    /// that nothing is dropped in silence - a member ConfigKit cannot render is reported here
+    /// and in the log, never simply absent.
+    /// </summary>
+    public IReadOnlyList<string> SchemaNotices => _schema?.Notices ?? [];
 
     /// <summary>Codes of every setting in this config, in no particular order.</summary>
     public IEnumerable<string> SettingCodes => _settings.Keys;
@@ -338,6 +365,12 @@ public sealed class Config : IConfig, IDisposable
     }
     public void AssignSettingsValues(object target)
     {
+        if (_schema != null && _schema.Root.IsInstanceOfType(target))
+        {
+            AssignBySchema(target);
+            return;
+        }
+
         Type targetType = target.GetType();
 
         IEnumerable<(string code, FieldInfo field)> fields = targetType.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Select(field => (ConfigSetting.NormalizeName(field.Name), field));
@@ -355,6 +388,58 @@ public sealed class Config : IConfig, IDisposable
             }
         }
     }
+    /// <summary>
+    /// Assigns every setting onto the object it was reflected from, using the schema rather
+    /// than matching a code against member names. A flattened config has codes like
+    /// "Thirst/HungerRate", which match no member name anywhere.
+    /// </summary>
+    private void AssignBySchema(object target)
+    {
+        foreach ((string code, ConfigSetting setting) in _settings)
+        {
+            try
+            {
+                AssignBySchema(target, code, setting);
+            }
+            catch (Exception exception)
+            {
+                LoggerUtil.Error(_api, this, $"Exception on assigning value for setting '{code}' for config '{_domain}'.\nException: {exception}");
+            }
+        }
+    }
+
+    private bool AssignBySchema(object target, string code, ConfigSetting setting)
+    {
+        if (!_nodesByPath.TryGetValue(code, out SchemaNode? node)) return false;
+
+        object? owner = OwnerFor(node, target);
+        return owner != null && setting.AssignTo(owner, node.Member);
+    }
+
+    /// <summary>
+    /// Assigns one setting back onto the registered object. The caller cannot do this itself:
+    /// a nested setting's code is a path, and only the schema knows which member it came from.
+    /// </summary>
+    internal void AssignSettingValue(object target, ConfigSetting setting)
+    {
+        if (_schema != null && _schema.Root.IsInstanceOfType(target))
+        {
+            AssignBySchema(target, setting.YamlCode, setting);
+            return;
+        }
+
+        setting.AssignSettingValue(target);
+    }
+
+    /// <summary>Walks down from the config root to the object this node's member lives on.</summary>
+    private object? OwnerFor(SchemaNode node, object root)
+    {
+        if (node.Parent == null) return root;
+
+        object? grandparent = OwnerFor(node.Parent, root);
+        return grandparent == null ? null : ResolveOwner(node.Parent, grandparent);
+    }
+
     public void SyncFromServer(Config config, bool isSinglePlayer)
     {
         if (isSinglePlayer)
@@ -412,6 +497,8 @@ public sealed class Config : IConfig, IDisposable
     private readonly string _defaultYaml = "";
     private readonly string _defaultJson = "{}";
     private readonly ConfigType _configType = ConfigType.YAML;
+    private ConfigSchema? _schema;
+    private Dictionary<string, SchemaNode> _nodesByPath = [];
     private FileSystemWatcher? _configFileWatcher;
     private bool _disposedValue;
     private readonly object _fileChangedLockObject = new();
@@ -457,10 +544,41 @@ public sealed class Config : IConfig, IDisposable
             FromYaml(settings.Values, defaultConfig);
         }
     }
-    private void ParseJson(JsonObject json, out Dictionary<string, ConfigSetting> settings, out SortedDictionary<float, IConfigBlock> configBlocks, out string defaultConfig, string domain)
+    private void ParseJson(JsonObject json, out Dictionary<string, ConfigSetting> settings, out SortedDictionary<float, IConfigBlock> configBlocks, out string defaultConfig, string domain, string? skeleton = null)
     {
         Version = FromJsonDefinition(json, out settings, out configBlocks, domain);
-        string jsonConfig = ReadConfigFile("{}", false);
+
+        // Bind before reading: a setting has to know the codes it used to answer to before
+        // anything looks a value up, or a renamed member reads nothing and silently takes
+        // its default.
+        BindSchemaToSettings(settings);
+
+        // The default document has to be finished before anything reads the file, because
+        // reading is what creates the file when there is none - and whatever is written there
+        // is then what the first load reads back. Seeding it with the raw skeleton got a
+        // [DefaultValue] wrong: the skeleton carries the field's initialiser, which is not the
+        // setting's default when an attribute overrides it.
+        string baseDocument = skeleton ?? (ReadConfigFile(out string existing) ? existing : "{}");
+
+        JsonObject defaults;
+        try
+        {
+            defaults = new(JObject.Parse(baseDocument));
+        }
+        catch (Exception exception)
+        {
+            LoggerUtil.Verbose(_api, this, $"[ParseJson] Error on parsing default document:\n{exception}");
+            defaults = new(new JObject());
+        }
+
+        foreach (ConfigSetting setting in settings.Values)
+        {
+            new JsonObjectPath(setting.YamlCode).SetOrCreate(defaults, StoredForm(setting, setting.DefaultValue));
+        }
+
+        defaultConfig = defaults.Token.ToString(Newtonsoft.Json.Formatting.Indented);
+
+        string jsonConfig = ReadConfigFile(defaultConfig, false);
 
         JsonObject jsonConfigObject;
 
@@ -474,21 +592,78 @@ public sealed class Config : IConfig, IDisposable
             throw;
         }
 
-        JsonObject jsonCopy = jsonConfigObject.Clone();
         foreach (ConfigSetting setting in settings.Values)
         {
-            JsonObjectPath jsonPath = new(setting.YamlCode);
-            IEnumerable<JsonObject> value = jsonPath.Get(jsonConfigObject);
-            jsonPath.Set(jsonCopy, setting.Value);
-            setting.Value = value.FirstOrDefault() ?? setting.DefaultValue;
+            setting.Value = ReadStoredValue(jsonConfigObject, setting) ?? setting.DefaultValue;
+        }
+    }
+
+    /// <summary>
+    /// What a setting looks like in the file. A mapped setting - an enum is modelled as one -
+    /// is stored as the member name, so a renamed member fails to resolve loudly instead of
+    /// silently landing on whatever now holds its old ordinal.
+    /// </summary>
+    private static JsonObject StoredForm(ConfigSetting setting, JsonObject value)
+        => setting.Validation?.Mapping == null ? value : new(new JValue(setting.MappingKey));
+
+    /// <summary>
+    /// Reads a setting out of a stored document, falling back to any code it used to be
+    /// written under. Aliases are read and never written, so a rename picks the old value up
+    /// once and writes it back under the new name on the next save.
+    /// </summary>
+    private static JsonObject? ReadStoredValue(JsonObject stored, ConfigSetting setting)
+    {
+        JsonObject? value = new JsonObjectPath(setting.YamlCode).Get(stored).FirstOrDefault((JsonObject?)null);
+        if (value != null) return value;
+
+        foreach (string legacy in setting.LegacyCodes)
+        {
+            value = new JsonObjectPath(legacy).Get(stored).FirstOrDefault((JsonObject?)null);
+            if (value != null) return value;
         }
 
-        defaultConfig = jsonCopy.Token.ToString(Newtonsoft.Json.Formatting.Indented);
+        return null;
+    }
+
+    /// <summary>
+    /// Hands each setting the metadata that lives on its schema node rather than in the
+    /// definition - the aliases it answers to, and the member it assigns back onto.
+    /// </summary>
+    private void BindSchemaToSettings(Dictionary<string, ConfigSetting> settings)
+    {
+        if (_schema == null) return;
+
+        _nodesByPath = _schema.Walk()
+            .Where(node => node.Kind == SchemaKind.Scalar)
+            .ToDictionary(node => node.Path, node => node);
+
+        foreach ((string code, ConfigSetting setting) in settings)
+        {
+            if (_nodesByPath.TryGetValue(code, out SchemaNode? node) && node.LegacyPaths.Count > 0)
+            {
+                setting.LegacyCodes = node.LegacyPaths;
+            }
+        }
+    }
+
+    private string? Skeleton(object configObject)
+    {
+        try
+        {
+            return JToken.FromObject(configObject).ToString(Newtonsoft.Json.Formatting.Indented);
+        }
+        catch (Exception exception)
+        {
+            // A member Newtonsoft cannot serialise should not cost the mod its whole config;
+            // without a skeleton the paths are still created by SetOrCreate as they are written.
+            LoggerUtil.Verbose(_api, this, $"Could not serialise '{_domain}' config object for its default document: {exception.Message}");
+            return null;
+        }
     }
     private JsonObject DefinitionFromObject(object configObject, string domain)
     {
         Type configObjectType = configObject.GetType();
-        MemberInfo[] members = configObjectType.GetMembers(BindingFlags.Public | BindingFlags.Instance);
+        _schema = SchemaBuilder.For(configObjectType);
         MemberInfo[] staticMembers = configObjectType.GetMembers(BindingFlags.Public | BindingFlags.Static);
 
         JObject root = [];
@@ -509,112 +684,148 @@ public sealed class Config : IConfig, IDisposable
             }
         }
 
-        foreach (MemberInfo member in members)
-        {
-            if (SettingDefinitionFromObject(member, configObject, domain, out JObject definition))
-            {
-                settings.Add(definition);
-            }
-        }
+        EmitSettings(_schema!.Nodes, configObject, settings, domain, section: null);
 
         return new JsonObject(root);
     }
-    private static bool SettingDefinitionFromObject(MemberInfo info, object configObject, string domain, out JObject definition)
+
+    /// <summary>
+    /// Walks the schema in order, emitting one setting block per scalar leaf and a separator
+    /// whenever the section changes. A nested object contributes no setting of its own - it
+    /// is a heading and a path prefix, and its leaves are ordinary settings with a path for a
+    /// code, so every control, validation and reset the flat case already had applies to them
+    /// unchanged.
+    /// </summary>
+    private void EmitSettings(List<SchemaNode> nodes, object? owner, JArray settings, string domain, string? section)
     {
-        definition = [];
-
-        ConfigSettingType settingType = GetSettingType(info);
-
-        if (settingType == ConfigSettingType.None) return false;
-
-        string code = info.Name;
-
-        definition.Add("code", code);
-        definition.Add("ingui", $"{domain}:setting-{code}");
-        definition.Add("type", settingType.ToString().ToLowerInvariant());
-        definition.Add("default", GetDefaultValue(info, configObject, settingType));
-
-        DescriptionAttribute? description = info.GetCustomAttribute<DescriptionAttribute>();
-        if (description != null)
+        foreach (SchemaNode node in nodes)
         {
-            definition.Add("comment", description.Description);
-        }
-
-        CategoryAttribute? category = info.GetCustomAttribute<CategoryAttribute>();
-        if (category != null)
-        {
-            IEnumerable<string> tags = category.Category.Replace(" ", "").Split(',').Select(tag => tag.Replace("_", "").ToLowerInvariant());
-
-            foreach (string tag in tags)
+            switch (node.Kind)
             {
-                switch (tag)
-                {
-                    case "clientside":
-                        definition.Add("clientSide", true);
-                        break;
-                    case "logarithmic":
-                        definition.Add("logarithmic", true);
-                        break;
-                }
+                case SchemaKind.Scalar:
+                    if (node.Section != section)
+                    {
+                        section = node.Section;
+                        AddSeparator(settings, section);
+                    }
+                    settings.Add(SettingDefinition(node, owner, domain));
+                    break;
+
+                case SchemaKind.Object:
+                    object? child = ResolveOwner(node, owner);
+                    // Suppress a heading nothing lands under - containers do not become
+                    // settings yet, so an object holding only containers has no rows.
+                    if (node.Children.Any(HasVisibleLeaf))
+                    {
+                        section = SchemaBuilder.ChildSection(node);
+                        AddSeparator(settings, section);
+                        EmitSettings(node.Children, child, settings, domain, section);
+                    }
+                    break;
+
+                // Containers and anything unclassifiable are reported through the schema's
+                // notices rather than emitted. They are not silent; they are just not yet
+                // editable.
+                default:
+                    break;
             }
         }
+    }
 
-        switch (settingType)
+    private static bool HasVisibleLeaf(SchemaNode node)
+        => node.Kind == SchemaKind.Scalar || (node.Kind == SchemaKind.Object && node.Children.Any(HasVisibleLeaf));
+
+    private static void AddSeparator(JArray settings, string? title)
+    {
+        if (title == null) return;
+
+        settings.Add(new JObject
+        {
+            { "type", "separator" },
+            { "title", title },
+            { "collapsible", true }
+        });
+    }
+
+    /// <summary>
+    /// The instance a nested object's leaves hang off. A config class that declares
+    /// <c>public ThirstConfig Thirst;</c> without initialising it is holding null, and
+    /// reading defaults out of null yields nothing - so create one and give it to the author's
+    /// object, which is the state their own code would have needed anyway.
+    /// </summary>
+    private object? ResolveOwner(SchemaNode node, object? owner)
+    {
+        if (owner == null) return null;
+
+        object? value = node.Member switch
+        {
+            PropertyInfo property => property.CanRead ? property.GetValue(owner) : null,
+            FieldInfo field => field.GetValue(owner),
+            _ => null
+        };
+
+        if (value != null) return value;
+
+        try
+        {
+            value = Activator.CreateInstance(node.MemberType);
+            if (value == null) return null;
+
+            switch (node.Member)
+            {
+                case PropertyInfo property when property.CanWrite: property.SetValue(owner, value); break;
+                case FieldInfo field when !field.IsInitOnly: field.SetValue(owner, value); break;
+            }
+        }
+        catch (Exception exception)
+        {
+            LoggerUtil.Verbose(_api, this, $"Could not create '{node.Path}' ({node.MemberType.Name}): {exception.Message}");
+            return null;
+        }
+
+        return value;
+    }
+
+    private static JObject SettingDefinition(SchemaNode node, object? owner, string domain)
+    {
+        JObject definition = [];
+
+        definition.Add("code", node.Path);
+        definition.Add("ingui", node.Label ?? $"{domain}:setting-{node.Code}");
+        definition.Add("type", node.ScalarType.ToString().ToLowerInvariant());
+        definition.Add("default", GetDefaultValue(node, owner));
+
+        if (node.Comment != null) definition.Add("comment", node.Comment);
+        if (node.ClientSide) definition.Add("clientSide", true);
+        if (node.Logarithmic) definition.Add("logarithmic", true);
+        if (node.Hidden) definition.Add("hide", true);
+
+        switch (node.ScalarType)
         {
             case ConfigSettingType.Float:
-                SetFloatSettingDefinition(info, definition);
+                SetFloatSettingDefinition(node.Member, definition);
                 break;
             case ConfigSettingType.Integer:
-                SetIntegerSettingDefinition(info, definition);
+                SetIntegerSettingDefinition(node.Member, node.MemberType, definition);
                 break;
             case ConfigSettingType.String:
-                SetStringSettingDefinition(info, definition);
+                SetStringSettingDefinition(node.Member, definition);
                 break;
             default:
                 break;
         }
 
-        return true;
+        return definition;
     }
-    private static ConfigSettingType GetSettingType(MemberInfo info)
+
+    private static JValue GetDefaultValue(SchemaNode node, object? owner)
     {
-        Type? valueType = (info as PropertyInfo)?.PropertyType ?? (info as FieldInfo)?.FieldType;
+        MemberInfo info = node.Member;
+        ConfigSettingType settingType = node.ScalarType;
 
-        if (valueType == null) return ConfigSettingType.None;
-
-        if (valueType.IsEnum)
-        {
-            return ConfigSettingType.Integer;
-        }
-        else if (valueType == typeof(float) || valueType == typeof(double))
-        {
-            return ConfigSettingType.Float;
-        }
-        else if (valueType == typeof(string))
-        {
-            return ConfigSettingType.String;
-        }
-        else if (valueType == typeof(bool))
-        {
-            return ConfigSettingType.Boolean;
-        }
-        else if (
-            valueType == typeof(int) ||
-            valueType == typeof(long) ||
-            valueType == typeof(short) ||
-            valueType == typeof(uint) ||
-            valueType == typeof(ulong) ||
-            valueType == typeof(ushort))
-        {
-            return ConfigSettingType.Integer;
-        }
-
-        return ConfigSettingType.None;
-    }
-    private static JValue GetDefaultValue(MemberInfo info, object configObject, ConfigSettingType settingType)
-    {
         DefaultValueAttribute? attribute = info.GetCustomAttribute<DefaultValueAttribute>();
-        object? value = attribute?.Value ?? (info as PropertyInfo)?.GetValue(configObject) ?? (info as FieldInfo)?.GetValue(configObject);
+        object? value = attribute?.Value
+            ?? (owner == null ? null : (info as PropertyInfo)?.GetValue(owner) ?? (info as FieldInfo)?.GetValue(owner));
 
         if (value == null) return new(value);
 
@@ -661,7 +872,7 @@ public sealed class Config : IConfig, IDisposable
             definition.Add("values", values);
         }
     }
-    private static void SetIntegerSettingDefinition(MemberInfo info, JObject definition)
+    private static void SetIntegerSettingDefinition(MemberInfo info, Type memberType, JObject definition)
     {
         RangeAttribute? rangeAttribute = info.GetCustomAttribute<RangeAttribute>();
         if (rangeAttribute != null)
@@ -674,7 +885,7 @@ public sealed class Config : IConfig, IDisposable
             definition.Add("range", range);
         }
 
-        Type? valueType = (info as PropertyInfo)?.PropertyType ?? (info as FieldInfo)?.FieldType;
+        Type? valueType = Nullable.GetUnderlyingType(memberType) ?? memberType;
         if (valueType?.IsEnum == true)
         {
             string[] enumNames = valueType.GetEnumNames();
@@ -1030,21 +1241,16 @@ public sealed class Config : IConfig, IDisposable
         foreach (ConfigSetting setting in settings.Where(item => !onlyClientSide || item.ClientSide))
         {
             JsonObjectPath jsonPath = new(setting.YamlCode);
-            if (setting.Validation?.Mapping == null)
+            JsonObject stored = StoredForm(setting, setting.Value);
+
+            // SetOrCreate rather than Set: on a config file written before this setting
+            // existed there is no node at its path to replace, and the old top-level fallback
+            // tested the code for a backslash while paths are split on a forward slash - so a
+            // nested setting was never written at all.
+            int count = jsonPath.SetOrCreate(config, stored);
+            if (count == 0 && !setting.YamlCode.Contains('/'))
             {
-                int count = jsonPath.Set(config, setting.Value);
-                if (count == 0 && !setting.YamlCode.Contains('\\'))
-                {
-                    (config.Token as JObject)?.Add(setting.YamlCode, setting.Value.Token);
-                }
-            }
-            else
-            {
-                int count = jsonPath.Set(config, new(new JValue(setting.MappingKey)));
-                if (count == 0 && !setting.YamlCode.Contains('\\'))
-                {
-                    (config.Token as JObject)?.Add(setting.YamlCode, setting.MappingKey);
-                }
+                (config.Token as JObject)?.Add(setting.YamlCode, stored.Token);
             }
         }
         return config.Token.ToString(Newtonsoft.Json.Formatting.Indented);
@@ -1054,10 +1260,7 @@ public sealed class Config : IConfig, IDisposable
         JsonObject jsonConfigObject = new(JObject.Parse(json));
         foreach (ConfigSetting setting in settings.Where(item => !onlyClientSide || item.ClientSide))
         {
-            JsonObjectPath jsonPath = new(setting.YamlCode);
-            IEnumerable<JsonObject> values = jsonPath.Get(jsonConfigObject);
-
-            JsonObject value = values.FirstOrDefault((JsonObject?)null) ?? setting.DefaultValue;
+            JsonObject value = ReadStoredValue(jsonConfigObject, setting) ?? setting.DefaultValue;
 
             if (setting.Validation?.Mapping == null)
             {

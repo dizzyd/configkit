@@ -17,8 +17,17 @@ internal sealed class JsonObjectPath
 {
     public JsonObjectPath(string path)
     {
-        _path = path.Split("/").Where(element => element != "").Select(Convert);
+        _segments = path.Split("/").Where(element => element != "").ToArray();
+        _path = _segments.Select(Convert).ToArray();
+
+        // Only a path made entirely of plain object keys can be created where it does not
+        // already exist - a wildcard or a range selects among things that exist and has no
+        // single place to put a missing one.
+        IsSimpleKeyPath = _segments.Length > 0 && _segments.All(IsPlainKey);
     }
+
+    /// <summary>True when every element is a plain object key, so <see cref="SetOrCreate"/> can build it.</summary>
+    public bool IsSimpleKeyPath { get; }
 
     public IEnumerable<JsonObject> Get(JsonObject tree)
     {
@@ -45,8 +54,49 @@ internal sealed class JsonObjectPath
         return targets.Count;
     }
 
+    /// <summary>
+    /// <see cref="Set"/> replaces tokens that are already there and creates nothing, which is
+    /// right for patching a game asset - you only ever edit what the asset already has. A
+    /// managed config is the other case: the setting exists in code and the player's file
+    /// predates it, so there is no "Thirst" object to descend into and the value would simply
+    /// never be written.
+    /// </summary>
+    public int SetOrCreate(JsonObject tree, JsonObject value)
+    {
+        int replaced = Set(tree, value);
+        if (replaced > 0 || !IsSimpleKeyPath) return replaced;
+
+        if (tree.Token is not JObject current) return 0;
+
+        for (int index = 0; index < _segments.Length - 1; index++)
+        {
+            if (current[_segments[index]] is JObject existing)
+            {
+                current = existing;
+                continue;
+            }
+
+            // Also covers the case where the key exists but holds a scalar, which happens
+            // when a member that used to be a number becomes a nested object.
+            JObject created = new();
+            current[_segments[index]] = created;
+            current = created;
+        }
+
+        current[_segments[^1]] = value.Token;
+        return 1;
+    }
+
+    private static bool IsPlainKey(string element)
+        => !int.TryParse(element, out _)
+           && element != "-"
+           && TryParseRange(element) == null
+           && TryParseWildcard(element) == null
+           && TryParseCondition(element) == null;
+
     private delegate IEnumerable<JsonObject> PathElementDelegate(IEnumerable<JsonObject> attribute);
     private readonly IEnumerable<PathElementDelegate> _path;
+    private readonly string[] _segments;
 
     private PathElementDelegate Convert(string element)
     {
