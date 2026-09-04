@@ -177,7 +177,8 @@ unless you set `[DisplayName]` or your mod ships a translation for
 enum becomes a dropdown of its member names.
 
 **Nested classes and containers work too**, which is the part that used to send authors to a
-hand-written ImGui panel:
+hand-written ImGui panel. **[STRUCTURED-CONFIG.md](STRUCTURED-CONFIG.md)** is the full guide
+with screenshots; the short version:
 
 ```csharp
 public class ConfigServer
