@@ -253,6 +253,12 @@ internal static class SchemaBuilder
         ApplyCategory(member, node, inherited: section);
 
         Classify(node, visiting, depth, notices);
+
+        if (CannotBeAssigned(node) && node.Kind is not (SchemaKind.Dictionary or SchemaKind.List))
+        {
+            node.ReadOnly = true;
+        }
+
         return node;
     }
 
@@ -418,6 +424,12 @@ internal static class SchemaBuilder
     {
         SchemaNode node = new() { MemberType = type, Path = path, Code = "" };
         Classify(node, visiting, depth, notices);
+
+        if (CannotBeAssigned(node) && node.Kind is not (SchemaKind.Dictionary or SchemaKind.List))
+        {
+            node.ReadOnly = true;
+        }
+
         return node;
     }
 
@@ -509,11 +521,21 @@ internal static class SchemaBuilder
     }
 
     private static bool IsReadOnly(MemberInfo member)
+        => member.GetCustomAttribute<ReadOnlyAttribute>()?.IsReadOnly == true;
+
+    /// <summary>
+    /// A member with no way to assign it. Offering a control for one is theatre: the player
+    /// edits it, the value is written to the file, and it never reaches the object.
+    ///
+    /// A collection is the exception, because it is filled in place rather than replaced -
+    /// which is exactly why <c>public List&lt;string&gt; X { get; } = new();</c> works.
+    /// </summary>
+    private static bool CannotBeAssigned(SchemaNode node) => node.Member switch
     {
-        if (member.GetCustomAttribute<ReadOnlyAttribute>()?.IsReadOnly == true) return true;
-        if (member is FieldInfo field) return field.IsInitOnly;
-        return false;
-    }
+        FieldInfo field => field.IsInitOnly,
+        PropertyInfo property => !property.CanWrite,
+        _ => false
+    };
 
     /// <summary>
     /// Matched by name so both Newtonsoft's and System.Text.Json's attributes are honoured.

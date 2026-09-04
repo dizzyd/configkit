@@ -836,7 +836,7 @@ public sealed class Config : IConfig, IDisposable
         JObject definition = [];
 
         definition.Add("code", node.Path);
-        definition.Add("ingui", node.Label ?? $"{domain}:setting-{node.Code}");
+        definition.Add("ingui", node.Label ?? LangKey(node, domain));
         definition.Add("type", node.ScalarType.ToString().ToLowerInvariant());
         definition.Add("default", GetDefaultValue(node, owner));
 
@@ -844,6 +844,7 @@ public sealed class Config : IConfig, IDisposable
         if (node.ClientSide) definition.Add("clientSide", true);
         if (node.Logarithmic) definition.Add("logarithmic", true);
         if (node.Hidden) definition.Add("hide", true);
+        if (node.ReadOnly) definition.Add("readonly", true);
 
         switch (node.ScalarType)
         {
@@ -877,13 +878,14 @@ public sealed class Config : IConfig, IDisposable
         JObject definition = [];
 
         definition.Add("code", node.Path);
-        definition.Add("ingui", node.Label ?? $"{domain}:setting-{node.Code}");
+        definition.Add("ingui", node.Label ?? LangKey(node, domain));
         definition.Add("type", "other");
         definition.Add("default", ContainerDefault(node, owner));
 
         if (node.Comment != null) definition.Add("comment", node.Comment);
         if (node.ClientSide) definition.Add("clientSide", true);
         if (node.Hidden) definition.Add("hide", true);
+        if (node.ReadOnly) definition.Add("readonly", true);
 
         return definition;
     }
@@ -908,6 +910,16 @@ public sealed class Config : IConfig, IDisposable
 
         return node.Kind == SchemaKind.List ? new JArray() : new JObject();
     }
+
+    /// <summary>
+    /// The translation key for a setting. Built from the whole path, because a member name
+    /// alone is not unique once objects nest - "Enabled" on two different sub-objects would
+    /// otherwise share one key, and a mod shipping translations would see one string on both
+    /// rows. The separator matches the "setting-" prefix rather than introducing a second
+    /// punctuation style, and a root level key is unchanged.
+    /// </summary>
+    private static string LangKey(SchemaNode node, string domain)
+        => $"{domain}:setting-{node.Path.Replace('/', '-')}";
 
     private static JValue GetDefaultValue(SchemaNode node, object? owner)
     {

@@ -56,6 +56,30 @@ public class SchemaTests
         public Thirst Thirst = new();
     }
 
+    public class ReadOnlySettings
+    {
+        public int Editable = 1;
+
+        [ReadOnly(true)]
+        public int Declared = 2;
+
+        /// <summary>Nothing can assign this, so a control for it would be theatre.</summary>
+        public readonly int Fixed = 3;
+
+        /// <summary>A get-only collection is a different case: it is filled in place.</summary>
+        public List<string> Fillable { get; } = new();
+    }
+
+    public class Doors { public bool Enabled = true; }
+    public class Chutes { public bool Enabled = true; }
+
+    /// <summary>Two sub-objects with the same field name - one translation key each, not one shared.</summary>
+    public class Colliding
+    {
+        public Doors Doors = new();
+        public Chutes Chutes = new();
+    }
+
     public class TaggedSettings
     {
         [Category("Waypoints, clientside")]
@@ -335,6 +359,54 @@ public class SchemaTests
             .Where(block => block["type"].AsString() == "separator")
             .Select(block => block["title"].AsString(""))
             .ToList();
+
+    /// <summary>
+    /// [ReadOnly] was read into the schema and then never used - it sat in the documentation
+    /// as a supported attribute while doing nothing at all.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task ReadOnlyMembersAreMarkedAndStillStored()
+    {
+        await OnServer();
+
+        Config config = Fresh(new ReadOnlySettings(), "schema-ro", "configkit-schema-ro.json");
+
+        Assert.False(((ConfigSetting)config.GetSetting("Editable")!).ReadOnly);
+        Assert.True(((ConfigSetting)config.GetSetting("Declared")!).ReadOnly, "[ReadOnly(true)] was ignored");
+        Assert.True(((ConfigSetting)config.GetSetting("Fixed")!).ReadOnly,
+            "a readonly field can never be assigned, so its control would do nothing");
+
+        // A collection is filled in place rather than replaced, so it stays editable.
+        Assert.False(((ConfigSetting)config.GetSetting("Fillable")!).ReadOnly,
+            "a get-only collection was marked read-only, but it is filled in place");
+
+        // Read-only is about the control, not the file: every key is still there.
+        Assert.True(FileJson(config).ContainsKey("Declared"));
+        Assert.True(FileJson(config).ContainsKey("Fixed"));
+    }
+
+    /// <summary>
+    /// A translation key built from the member name alone is not unique once objects nest:
+    /// two sub-objects each with an "Enabled" field shared one key, so a mod shipping
+    /// translations would have seen one string on both rows.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task NestedSettingsDoNotShareATranslationKey()
+    {
+        await OnServer();
+
+        Config config = Fresh(new Colliding(), "schema-lang", "configkit-schema-lang.json");
+
+        string[] keys = config.Definition["settings"].AsArray()
+            .Where(block => block["type"].AsString() != "separator")
+            .Select(block => block["ingui"].AsString(""))
+            .ToArray();
+
+        Assert.Equal(2, keys.Length);
+        Assert.Equal(2, keys.Distinct().Count(), $"two settings share one lang key: {string.Join(", ", keys)}");
+        Assert.True(keys.Contains("schema-lang:setting-Doors-Enabled"),
+            $"expected the path in the key; got {string.Join(", ", keys)}");
+    }
 
     // ---------------------------------------------------------------- exclusion
 

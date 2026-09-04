@@ -69,6 +69,8 @@ public class ConfigSetting : ISetting
     public string? InGui { get; internal set; }
     public bool Logarithmic { get; internal set; }
     public bool ClientSide { get; internal set; }
+    /// <summary>Shown but not editable: [ReadOnly(true)], or a member with no way to assign it.</summary>
+    public bool ReadOnly { get; internal set; }
     public bool Hide { get; internal set; }
     public string Link { get; internal set; } = "";
     public bool ChangedSinceLastSave {
@@ -112,6 +114,7 @@ public class ConfigSetting : ISetting
         ClientSide = previous.ClientSide;
         SettingChanged = previous.SettingChanged;
         Hide = previous.Hide;
+        ReadOnly = previous.ReadOnly;
         Link = previous.Link;
         LegacyCodes = previous.LegacyCodes;
     }
@@ -496,6 +499,7 @@ public class ConfigSetting : ISetting
             SortingWeight = json["weight"].AsFloat(0),
             Logarithmic = json["logarithmic"].AsBool(false),
             Hide = json["hide"].AsBool(false),
+            ReadOnly = json["readonly"].AsBool(false),
             Link = json["link"].AsString(""),
         };
 

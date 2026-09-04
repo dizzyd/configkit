@@ -515,7 +515,10 @@ public class ConfigDialog : GuiDialog
                 continue;
             }
 
-            bool locked = IsServerControlled(setting);
+            // Two different reasons a row cannot be edited, and they read differently: one
+            // says the server owns it, the other that nothing owns it.
+            bool serverOwned = IsServerControlled(setting);
+            bool locked = serverOwned || setting.ReadOnly;
             SchemaNode? node = config.NodeFor(setting.YamlCode);
             bool container_ = node != null && (node.Kind == SchemaKind.Dictionary || node.Kind == SchemaKind.List);
 
@@ -526,7 +529,7 @@ public class ConfigDialog : GuiDialog
             ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
 
             container.Add(new GuiElementDynamicText(capi,
-                locked ? LabelFor(setting) + " (server)" : LabelFor(setting),
+                serverOwned ? LabelFor(setting) + " (server)" : LabelFor(setting),
                 locked ? CairoFont.WhiteDetailText().WithColor(GuiStyle.ColorParchment) : CairoFont.WhiteDetailText(),
                 labelBounds));
 
