@@ -264,8 +264,9 @@ public class SchemaTests
 
         List<string> titles = SeparatorTitles(config);
 
-        Assert.True(titles.Contains("Rain collector") || titles.Contains("RainCollector"),
-            $"no section for the nested object; got {string.Join(", ", titles)}");
+        // Tidied up the same way a label is, so a heading reads "Rain collector".
+        Assert.True(titles.Contains("Rain collector"),
+            $"no tidied section for the nested object; got {string.Join(", ", titles)}");
         Assert.True(titles.Contains("Doors"), $"[Category] did not name a section; got {string.Join(", ", titles)}");
     }
 
@@ -298,6 +299,35 @@ public class SchemaTests
         Assert.True(((ConfigSetting)config.GetSetting("Colour")!).ClientSide,
             "the clientside flag was lost when [Category] also named a section");
         Assert.True(SeparatorTitles(config).Contains("Waypoints"));
+    }
+
+    /// <summary>
+    /// A nested setting's code is a path, but its row says only its own name - the heading
+    /// above it already says which object it belongs to.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task ANestedRowIsLabelledByItsOwnNameNotItsPath()
+    {
+        await OnClient();
+
+        Delete("configkit-schema-label.json");
+        NestedSettings settings = new();
+        Config config = new(Capi, "schema-label", "schema-label", settings, "configkit-schema-label.json");
+
+        ConfigKit.Gui.ConfigDialog dialog = new(Capi,
+            new Dictionary<string, Config> { ["schema-label"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(8);
+
+        string section = dialog.Sections.First(title => title.Contains("Rain"));
+        dialog.ToggleSectionNamed(section);
+        await Frames.Wait(6);
+
+        Assert.True(dialog.RenderedLabels.Contains("Litres per hour"),
+            $"expected a tidy row label; on screen: {string.Join(", ", dialog.RenderedLabels)}");
+
+        dialog.TryClose();
     }
 
     private static List<string> SeparatorTitles(Config config)

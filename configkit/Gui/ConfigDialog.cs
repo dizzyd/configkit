@@ -149,6 +149,10 @@ public class ConfigDialog : GuiDialog
                 .Select(block => block.Title)
                 .ToList();
 
+    /// <summary>The label drawn beside each setting currently on screen.</summary>
+    public IReadOnlyList<string> RenderedLabels
+        => _settingsByKey.Values.Select(LabelFor).ToList();
+
     /// <summary>The unfolded section, or null when none is - or when they are all shown.</summary>
     public string? OpenSection => _allOpen ? null : _openSection;
 
@@ -180,6 +184,7 @@ public class ConfigDialog : GuiDialog
 
         ContainerFrame frame = _stack[^1];
         if (frame.Locked) { reason = "the server owns this setting"; return false; }
+        if (frame.Node.Kind == SchemaKind.Object) { reason = "this is a fixed set of settings"; return false; }
         if (frame.Node.Kind != SchemaKind.Dictionary) return true;
 
         JObject existing = Subtree.Navigate(frame.Setting.Value.Token, frame.Path) as JObject ?? new JObject();
@@ -198,7 +203,9 @@ public class ConfigDialog : GuiDialog
 
         if (config.GetSetting(yamlCode) is not ConfigSetting setting) return false;
 
-        return OpenContainer(setting, node, yamlCode, IsServerControlled(setting));
+        // The same crumb the row's own button uses, so driving the screen from code and
+        // clicking it produce the same breadcrumb.
+        return OpenContainer(setting, node, LabelFor(setting), IsServerControlled(setting));
     }
 
     /// <summary>Opens the entry with this label, for a value that is itself a container or an object.</summary>
@@ -207,20 +214,34 @@ public class ConfigDialog : GuiDialog
         if (_stack.Count == 0) return false;
 
         ContainerFrame frame = _stack[^1];
-        SchemaNode? schema = frame.Node.Kind == SchemaKind.Dictionary ? frame.Node.ValueNode : frame.Node.ElementNode;
-        if (schema == null || schema.Kind is not (SchemaKind.Object or SchemaKind.Dictionary or SchemaKind.List)) return false;
-
         JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
 
         foreach ((object step, string entryLabel, JToken _) in Entries(token, frame.Node))
         {
             if (entryLabel != label) continue;
 
+            SchemaNode? schema = SchemaOf(frame, step);
+            if (schema == null || schema.Kind is not (SchemaKind.Object or SchemaKind.Dictionary or SchemaKind.List))
+            {
+                return false;
+            }
+
             return OpenNested(frame, new List<object>(frame.Path) { step }, schema, label);
         }
 
         return false;
     }
+
+    /// <summary>
+    /// The schema for one row. A collection's rows all share the value schema; an object's
+    /// rows each have their own, because its fields are not interchangeable.
+    /// </summary>
+    private static SchemaNode? SchemaOf(ContainerFrame frame, object step) => frame.Node.Kind switch
+    {
+        SchemaKind.Object => frame.Node.Children.FirstOrDefault(child => child.Code as object is string code && Equals(code, step)),
+        SchemaKind.Dictionary => frame.Node.ValueNode,
+        _ => frame.Node.ElementNode
+    };
 
     /// <summary>Goes up one container screen, as the Back button does.</summary>
     public bool Back() => OnBack();
@@ -231,7 +252,7 @@ public class ConfigDialog : GuiDialog
     /// <summary>Removes the entry with this label, as its row's button does.</summary>
     public bool RemoveEntry(string label)
     {
-        if (_stack.Count == 0) return false;
+        if (_stack.Count == 0 || _stack[^1].Node.Kind == SchemaKind.Object) return false;
 
         ContainerFrame frame = _stack[^1];
         JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
@@ -250,7 +271,7 @@ public class ConfigDialog : GuiDialog
     /// </summary>
     public bool RenameEntry(string from, string to)
     {
-        if (_stack.Count == 0) return false;
+        if (_stack.Count == 0 || _stack[^1].Node.Kind == SchemaKind.Object) return false;
 
         bool renamed = Subtree.Rename(_stack[^1].Setting, _stack[^1].Path, from, to);
         Recompose();
@@ -604,7 +625,12 @@ public class ConfigDialog : GuiDialog
         // "mymod:setting-MaxRadius" is worse than showing "Max radius".
         if (string.IsNullOrWhiteSpace(label) || IsUntranslatedLangKey(label!))
         {
-            return Humanize(setting.YamlCode);
+            // The last segment only. A nested setting's code is a path, and a row reading
+            // "Rain collector/litres per hour" repeats what its own heading already says.
+            string code = setting.YamlCode;
+            int slash = code.LastIndexOf('/');
+
+            return Humanize(slash >= 0 ? code[(slash + 1)..] : code);
         }
 
         return label!;
@@ -614,14 +640,7 @@ public class ConfigDialog : GuiDialog
         => label.Contains(':') && !label.Contains(' ');
 
     /// <summary>"MaxClientViewDistance" -> "Max client view distance".</summary>
-    private static string Humanize(string code)
-    {
-        string spaced = Regex.Replace(code.Replace('_', ' '), "(?<=[a-z0-9])(?=[A-Z])", " ");
-        spaced = spaced.Trim();
-        if (spaced.Length == 0) return code;
-
-        return char.ToUpperInvariant(spaced[0]) + spaced[1..].ToLowerInvariant();
-    }
+    private static string Humanize(string code) => SchemaBuilder.Humanize(code);
 
     // ------------------------------------------------------------------ controls
 
@@ -1021,6 +1040,66 @@ public class ConfigDialog : GuiDialog
     private double LayoutEntries(GuiElementContainer? container)
     {
         ContainerFrame frame = _stack[^1];
+
+        // An object has a fixed shape: its fields are not entries, they cannot be renamed,
+        // removed or added to, and each one has a control of its own. Running it through the
+        // collection layout turned every field name into an editable key with a delete button
+        // beside it, which is nonsense.
+        return frame.Node.Kind == SchemaKind.Object
+            ? LayoutObjectRows(container, frame)
+            : LayoutCollectionRows(container, frame);
+    }
+
+    /// <summary>One row per field of a fixed-shape object, the same shape as the root screen.</summary>
+    private double LayoutObjectRows(GuiElementContainer? container, ContainerFrame frame)
+    {
+        double y = 4;
+        int index = 0;
+
+        if (container != null) { _widgets.Clear(); _sliderValues.Clear(); }
+
+        JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
+
+        foreach (SchemaNode child in frame.Node.Children)
+        {
+            if (child.Hidden || (!child.IsSetting && child.Kind != SchemaKind.Object)) continue;
+
+            string label = child.Label ?? SchemaBuilder.Humanize(child.Code);
+            if (_filter.Length > 0 && !label.Contains(_filter, StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (container == null)
+            {
+                y += RowHeight + RowGap;
+                index++;
+                continue;
+            }
+
+            string key = $"field-{index++}";
+
+            ElementBounds labelBounds = ElementBounds.Fixed(0, y + 4, LabelWidth, RowHeight);
+            ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
+
+            container.Add(new GuiElementDynamicText(capi, label, CairoFont.WhiteDetailText(), labelBounds));
+
+            if (!string.IsNullOrEmpty(child.Comment))
+            {
+                container.Add(new GuiElementHoverText(capi, child.Comment,
+                    CairoFont.WhiteDetailText(), 320, labelBounds.FlatCopy()));
+            }
+
+            JToken value = (token is JObject holder ? holder[child.Code] : null)
+                ?? KeyGenerator.BlankValue(child);
+
+            AddEntryValue(container, frame, child.Code, label, value, child, controlBounds, key);
+
+            y += RowHeight + RowGap;
+        }
+
+        return y + 6;
+    }
+
+    private double LayoutCollectionRows(GuiElementContainer? container, ContainerFrame frame)
+    {
         double y = 4;
         int index = 0;
 
@@ -1079,6 +1158,21 @@ public class ConfigDialog : GuiDialog
 
     private static IEnumerable<(object step, string label, JToken value)> Entries(JToken? token, SchemaNode node)
     {
+        if (node.Kind == SchemaKind.Object)
+        {
+            foreach (SchemaNode child in node.Children)
+            {
+                if (child.Hidden || (!child.IsSetting && child.Kind != SchemaKind.Object)) continue;
+
+                JToken value = (token is JObject holder ? holder[child.Code] : null)
+                    ?? KeyGenerator.BlankValue(child);
+
+                yield return (child.Code, child.Label ?? SchemaBuilder.Humanize(child.Code), value);
+            }
+
+            yield break;
+        }
+
         switch (token)
         {
             case JObject o:

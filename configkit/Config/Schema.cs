@@ -488,7 +488,10 @@ internal static class SchemaBuilder
     {
         if (node.SectionExplicit && node.Section != null) return node.Section;
 
-        string own = node.Label ?? node.Code;
+        // An author's [Category] is used as written; a name derived from a member is tidied
+        // up the same way a label is, so a heading reads "Rain collector" and not
+        // "RainCollector".
+        string own = node.Label ?? Humanize(node.Code);
         return node.Section == null ? own : $"{node.Section} › {own}";
     }
 
@@ -570,6 +573,18 @@ internal static class SchemaBuilder
     /// CanConvertFrom half that makes this mean anything - and it is the same test Newtonsoft
     /// uses to decide to write the value as a string.
     /// </summary>
+    /// <summary>"MaxClientViewDistance" -> "Max client view distance".</summary>
+    internal static string Humanize(string code)
+    {
+        string spaced = System.Text.RegularExpressions.Regex
+            .Replace(code.Replace('_', ' '), "(?<=[a-z0-9])(?=[A-Z])", " ")
+            .Trim();
+
+        if (spaced.Length == 0) return code;
+
+        return char.ToUpperInvariant(spaced[0]) + spaced[1..].ToLowerInvariant();
+    }
+
     private static bool ConvertsToAndFromString(Type type)
     {
         if (type == typeof(object)) return false;

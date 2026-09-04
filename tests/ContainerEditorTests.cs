@@ -394,6 +394,42 @@ public class ContainerEditorTests
         dialog.TryClose();
     }
 
+    /// <summary>
+    /// A dictionary entry whose value is a class has a fixed shape: its fields are settings
+    /// with their own controls, not entries. Running it through the collection layout turned
+    /// every field name into an editable key with a delete button beside it.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task AnObjectEntryShowsItsFieldsNotEditableKeys()
+    {
+        await OnClient();
+
+        (ConfigDialog dialog, Settings settings) = Open("drill-object");
+        await Frames.Wait(6);
+
+        Assert.True(dialog.OpenSetting("Creatures"));
+        await Frames.Wait(4);
+        Assert.True(dialog.OpenEntry("game:wolf-male"));
+        await Frames.Wait(6);
+
+        // Its own fields, labelled, in declaration order - not the JSON's keys.
+        Assert.Equal("Entity code,Chance,Closes behind,Doors", string.Join(",", dialog.EntryLabels));
+
+        // None of the collection verbs apply to a class.
+        Assert.False(dialog.CanAddEntry(out string reason), "a field could be added to a class");
+        Assert.True(reason.Length > 0);
+        Assert.False(dialog.RemoveEntry("Chance"), "a field of a class could be deleted");
+        Assert.False(dialog.RenameEntry("Chance", "Luck"), "a field of a class could be renamed");
+
+        // A container field of that class still opens, one level further down.
+        Assert.True(dialog.OpenEntry("Doors"), "the list inside the entry would not open");
+        await Frames.Wait(4);
+        Assert.Equal("Creatures > game:wolf-male > Doors", string.Join(" > ", dialog.OpenPath));
+
+        dialog.TryClose();
+    }
+
     // ---------------------------------------------------------------- code hints
 
     /// <summary>
