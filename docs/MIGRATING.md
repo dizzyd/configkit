@@ -147,21 +147,72 @@ isn't installed.
 
 ### Attributes you can use
 
+All of them are stock .NET. Your settings class keeps no reference to ConfigKit.
+
 | Attribute | Effect |
 |---|---|
 | `[Description("…")]` | Tooltip in the settings screen |
 | `[Range(min, max)]` | Slider instead of a text box |
 | `[DefaultValue(x)]` | Value used by "restore defaults" |
-| `[Category("…")]` | Groups settings under a heading |
+| `[Category("…")]` | Groups settings under a foldable heading |
 | `[AllowedValues(…)]` | Dropdown of fixed choices |
+| `[DisplayName("…")]` | Label, instead of the tidied-up field name |
+| `[JsonProperty("…")]` | The key to write in the file, when it differs from the field name |
+| `[Browsable(false)]` | Hidden from the screen, still saved |
+| `[JsonIgnore]` | Not saved at all |
+| `[Key]` | On a member of a list element: which field labels its row |
+| `[DataType("blockcode")]` | Keys are block codes, so a typo gets flagged |
 
 The label comes from the field name, tidied up, so `SearchRadius` shows as "Search radius",
-unless your mod ships a translation for `<yourmod>:setting-SearchRadius`.
+unless you set `[DisplayName]` or your mod ships a translation for
+`<yourmod>:setting-SearchRadius`.
+
+`[Category]` takes a section name. It also still understands the two words configlib used —
+`clientside` and `logarithmic` — and you can write both at once:
+`[Category("Waypoints, clientside")]`.
 
 ### Field types
 
-`bool`, `string`, `int`, `float`, `double`, `long` and enums all work. An enum becomes a
-dropdown of its member names.
+`bool`, `string`, `int`, `float`, `double`, `long`, `decimal`, `byte` and enums all work. An
+enum becomes a dropdown of its member names.
+
+**Nested classes and containers work too**, which is the part that used to send authors to a
+hand-written ImGui panel:
+
+```csharp
+public class ConfigServer
+{
+    public bool Enabled = true;                          // a plain row
+
+    public RainCollector RainCollector = new();          // a section, one row per field
+
+    [Category("Doors")]
+    [DataType("blockcode")]
+    public Dictionary<string, int> AutoCloseDelays = new();   // opens its own screen
+
+    public Dictionary<string, CreatureOpenDoors> Creatures = new();
+    public List<string> Blacklist { get; } = new();      // get-only is fine
+}
+```
+
+- **A nested class** becomes a foldable section, and each of its fields an ordinary row with
+  its own slider, dropdown and Reset. In the file it stays nested, exactly as
+  `StoreModConfig` would have written it.
+- **A dictionary, list, set or array** becomes one row that opens its own screen: one entry
+  per line, an editable key, a filter box, and Add and delete. Nesting works — a
+  `Dictionary<string, Dictionary<string, float>>` is that screen twice.
+- Dictionary keys can be `string`, an enum, or anything with a `TypeConverter` such as
+  `AssetLocation`. Add picks a key that is free rather than one already in use, and renaming
+  onto an existing key is refused instead of quietly replacing it.
+- `Dictionary<string, JToken>` round-trips untouched, so the usual "read the old config and
+  migrate it" field keeps working.
+- A `[DataType("blockcode")]`, `"itemcode"` or `"entitycode"` on a dictionary describes its
+  keys: the screen then marks any key that names nothing loaded. Wildcards like
+  `game:door-*` count as valid.
+
+Anything ConfigKit cannot render is **reported at registration**, never silently dropped —
+look for the `[ConfigKit] Registered '<yourmod>'` line in the log, which says how many
+settings, sections and containers it found and names anything it could not make editable.
 
 > Under configlib, a `double`, a `long`, an enum, or a `[DefaultValue(3)]` on a `float`
 > field throws while reading your defaults and takes the **whole** registration down with

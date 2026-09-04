@@ -69,6 +69,16 @@ public class ContainerEditorTests
         [Category("Loot")]
         public List<Door> Pool = new() { new Door { EntityCode = "first" } };
 
+        /// <summary>Dana Tweaks' AutoCloseDelays: keys are block codes, wildcards included.</summary>
+        [Category("Blocks")]
+        [DataType("blockcode")]
+        public Dictionary<string, int> Blocks = new()
+        {
+            ["game:door-plank-north-down-closed-left"] = 1,
+            ["game:door-*"] = 2,
+            ["game:not-a-real-block"] = 3
+        };
+
         public Rain Rain = new();
     }
 
@@ -380,6 +390,75 @@ public class ContainerEditorTests
         Assert.True(settings.Flow["copper"].ContainsKey("inflow"),
             $"the deep edit did not reach the object; keys: {string.Join(",", settings.Flow["copper"].Keys)}");
         Assert.Close(1f, settings.Flow["copper"]["inflow"], 0.001f);
+
+        dialog.TryClose();
+    }
+
+    // ---------------------------------------------------------------- code hints
+
+    /// <summary>
+    /// A mistyped block code is the commonest way a structured config quietly does nothing:
+    /// the entry looks right in the file and simply never matches. [DataType] is what lets
+    /// the screen say so, and a wildcard has to count as valid or every real config is wrong.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task ACodeThatNamesNothingIsFlaggedAndAWildcardIsNot()
+    {
+        await OnClient();
+
+        bool? exact = CodeHints.Resolves(Capi, "blockcode", "game:door-plank-north-down-closed-left");
+        bool? wild = CodeHints.Resolves(Capi, "blockcode", "game:door-*");
+        bool? bogus = CodeHints.Resolves(Capi, "blockcode", "game:not-a-real-block");
+        bool? entity = CodeHints.Resolves(Capi, "entitycode", "game:wolf-*");
+
+        string seen = $"blocks={Capi.World.Blocks?.Count} entities={Capi.World.EntityTypes?.Count} "
+                    + $"exact={exact} wild={wild} bogus={bogus} entity={entity}";
+
+        Assert.True(wild == true, $"a wildcard over real blocks was not accepted: {seen}");
+        Assert.True(exact == true, $"an exact real block code was not accepted: {seen}");
+        Assert.True(bogus == false, $"a code that names nothing was not flagged: {seen}");
+        Assert.True(entity == true, $"a wildcard over real entities was not accepted: {seen}");
+
+        // No attribute means no opinion. Marking every key on an unannotated dictionary would
+        // be worse than saying nothing.
+        Assert.Null(CodeHints.Resolves(Capi, null, "game:whatever"));
+        Assert.Null(CodeHints.Resolves(Capi, "somethingelse", "game:whatever"));
+    }
+
+    /// <summary>The attribute is spelled several ways in the wild; all of them mean the same thing.</summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task TheHintIsForgivingAboutHowItIsSpelled()
+    {
+        await OnClient();
+
+        foreach (string spelling in new[] { "blockcode", "block-code", "block_code", "Block", "BLOCKS" })
+        {
+            // Compared with == rather than Assert.Equal: the harness does not unify bool
+            // with bool?, so Assert.Equal(true, someNullableBool) fails whatever it holds.
+            Assert.True(CodeHints.Resolves(Capi, spelling, "game:door-*") == true,
+                $"'{spelling}' was not understood");
+        }
+
+        Assert.NotNull(CodeHints.Placeholder("entitycode"));
+    }
+
+    /// <summary>The screen still composes with a dictionary whose keys are checked.</summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task ADictionaryOfBlockCodesStillOpens()
+    {
+        await OnClient();
+
+        (ConfigDialog dialog, _) = Open("hint-open");
+        await Frames.Wait(6);
+
+        Assert.True(dialog.OpenSetting("Blocks"));
+        await Frames.Wait(6);
+
+        Assert.Equal("game:door-plank-north-down-closed-left,game:door-*,game:not-a-real-block",
+            string.Join(",", dialog.EntryLabels));
 
         dialog.TryClose();
     }

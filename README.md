@@ -44,6 +44,10 @@ Most mods need **no changes**. Find your case in
 | calls into the library | swap a reference, rebuild |
 | draws its own ImGui settings screen | describe the settings instead, usually *less* code |
 
+Nested classes, dictionaries and lists all work: a sub-object becomes a foldable section, a
+dictionary becomes a screen of its own with a filter and an Add button, and neither needs a
+line of UI code. See **[docs/MIGRATING.md](docs/MIGRATING.md)** for the shapes it handles.
+
 A settings class needs only stock .NET attributes (`[Description]`, `[Range]`,
 `[Category]`), so it keeps no reference to ConfigKit and still compiles and runs
 without it.

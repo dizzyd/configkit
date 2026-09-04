@@ -59,6 +59,7 @@ public class ConfigDialog : GuiDialog
     private const double KeyWidth = 250;
     private const double EntryValueWidth = 240;
     private const double DeleteWidth = 28;
+    private const double MarkWidth = 22;
     private const double EntryGap = 12;
     private const double SectionHeight = 34;
 
@@ -1049,6 +1050,11 @@ public class ConfigDialog : GuiDialog
             AddEntryKey(container, frame, step, label, keyBounds);
             AddEntryValue(container, frame, step, label, value, valueSchema, valueBounds, key);
 
+            if (frame.Node.Kind == SchemaKind.List && value.Type == JTokenType.String)
+            {
+                AddCodeMark(container, frame.Node.KeySource, value.Value<string>() ?? "", keyBounds);
+            }
+
             if (!frame.Locked)
             {
                 object removed = step;
@@ -1108,6 +1114,8 @@ public class ConfigDialog : GuiDialog
 
     private void AddEntryKey(GuiElementContainer container, ContainerFrame frame, object step, string label, ElementBounds bounds)
     {
+        AddCodeMark(container, frame.Node.KeySource, label, bounds);
+
         // A list index is not editable, and neither is anything on a server-owned config.
         if (frame.Locked || step is not string existing)
         {
@@ -1119,8 +1127,35 @@ public class ConfigDialog : GuiDialog
             text => OnRenameKey(frame, existing, text.Trim()),
             CairoFont.WhiteDetailText());
 
+        string? placeholder = CodeHints.Placeholder(frame.Node.KeySource);
+        if (placeholder != null) input.SetPlaceHolderText(placeholder);
+
         container.Add(input);
         _afterCompose.Add(() => input.SetValue(existing));
+    }
+
+    /// <summary>
+    /// Marks a code that names nothing the game has loaded. A mistyped block code is the
+    /// commonest way a structured config quietly does nothing - the entry looks right in the
+    /// file and simply never matches - and nothing in the game says so today.
+    ///
+    /// Only ever marks a definite "no". A member with no [DataType], or a registry that has
+    /// not loaded, gets no opinion rather than a warning.
+    /// </summary>
+    private void AddCodeMark(GuiElementContainer container, string? dataType, string code, ElementBounds row)
+    {
+        if (CodeHints.Resolves(capi, dataType, code) != false) return;
+
+        ElementBounds bounds = ElementBounds.Fixed(
+            KeyWidth + EntryGap + EntryValueWidth + EntryGap + DeleteWidth + 6,
+            row.fixedY + 2, MarkWidth, row.fixedHeight);
+
+        container.Add(new GuiElementDynamicText(capi, "!",
+            CairoFont.WhiteDetailText().WithColor(GuiStyle.ErrorTextColor), bounds));
+
+        container.Add(new GuiElementHoverText(capi,
+            $"No {CodeHints.Describe(dataType)} matches '{code}'. It will have no effect. Wildcards like 'game:door-*' are fine.",
+            CairoFont.WhiteDetailText(), 300, bounds.FlatCopy()));
     }
 
     private void AddEntryValue(GuiElementContainer container, ContainerFrame frame, object step, string label,
@@ -1206,6 +1241,15 @@ public class ConfigDialog : GuiDialog
                     text => Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(text)),
                     CairoFont.WhiteDetailText());
                 Remember(key, container, input);
+
+                // A list of codes describes its elements with the same attribute a dictionary
+                // uses for its keys, so the hint and the mark apply here too.
+                if (frame.Node.Kind == SchemaKind.List)
+                {
+                    string? placeholder = CodeHints.Placeholder(frame.Node.KeySource);
+                    if (placeholder != null) input.SetPlaceHolderText(placeholder);
+                }
+
                 string text = value.Type == JTokenType.String ? value.Value<string>() ?? "" : value.ToString();
                 _afterCompose.Add(() => input.SetValue(text));
                 break;
