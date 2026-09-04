@@ -114,6 +114,10 @@ public class ConfigDialogTests
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]
+    // Joined to a server, this setting is server-controlled and renders as read-only text
+    // with no slider behind it, so there is no readout to look up. Pre-existing; the test
+    // has always errored in the two-process tier rather than skipping.
+    [SingleplayerOnly]
     public async Task SliderReadoutsShowTheSettingsOwnValue()
     {
         await OnClient();
