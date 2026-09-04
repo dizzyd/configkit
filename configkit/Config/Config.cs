@@ -777,17 +777,35 @@ public sealed class Config : IConfig, IDisposable
                 continue;
             }
 
-            // A dead node cannot be persisted at all, so there is nothing to emit. It is
-            // reported through the schema's notices and the registration summary, which is
-            // the whole difference from the walk this replaced.
-            if (node.IsSetting) into.Add((node, owner));
+            // A dead node gets no setting - it cannot round-trip, so giving it a key in the
+            // file would be worse than leaving it out - but it does get a line on screen. The
+            // rule is that nothing vanishes, and a log line the player never sees is not that.
+            if (node.IsSetting || node.Kind == SchemaKind.Dead) into.Add((node, owner));
         }
     }
 
-    private static JObject DefinitionFor(SchemaNode node, object? owner, string domain)
-        => node.Kind == SchemaKind.Scalar
-            ? SettingDefinition(node, owner, domain)
-            : ContainerDefinition(node, owner, domain);
+    private static JObject DefinitionFor(SchemaNode node, object? owner, string domain) => node.Kind switch
+    {
+        SchemaKind.Scalar => SettingDefinition(node, owner, domain),
+        SchemaKind.Dead => DeadRow(node),
+        _ => ContainerDefinition(node, owner, domain)
+    };
+
+    /// <summary>
+    /// A member ConfigKit cannot store or edit, said out loud where the player is looking
+    /// rather than only in the log. Emitted as a formatting block, because it is text and not
+    /// a setting - there is nothing here to persist.
+    /// </summary>
+    private static JObject DeadRow(SchemaNode node)
+    {
+        string label = node.Label ?? SchemaBuilder.Humanize(node.Code);
+
+        return new JObject
+        {
+            { "type", "separator" },
+            { "text", $"{label} — not editable ({node.DeadReason ?? "unsupported"})" }
+        };
+    }
 
     private static void AddSeparator(JArray settings, string? title)
     {

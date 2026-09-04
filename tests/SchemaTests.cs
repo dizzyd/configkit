@@ -129,6 +129,15 @@ public class SchemaTests
         public int Untouched = 7;
     }
 
+    public abstract class Unbuildable { public int Value; }
+
+    /// <summary>A member with no way to construct it: nothing can store or edit this.</summary>
+    public class HasDeadMember
+    {
+        public int Editable = 1;
+        public Unbuildable Broken = null!;
+    }
+
     /// <summary>
     /// Two mods in the published corpus hold a member of their own declaring type - a handle
     /// back to the config rather than config data. Walking it is an infinite recursion.
@@ -484,6 +493,40 @@ public class SchemaTests
             "[Browsable(false)] did not hide the row");
 
         Assert.False(config.SettingCodes.Contains("NotPersisted"), "[JsonIgnore] member was still managed");
+    }
+
+    /// <summary>
+    /// The rule is that nothing vanishes. A member ConfigKit cannot store gets no setting -
+    /// a key in the file for something that cannot round-trip would be worse - but it does
+    /// get a line on screen. Reporting it only in the log is not the same thing: the player
+    /// never sees the log.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task AMemberThatCannotBeStoredStillSaysSoOnScreen()
+    {
+        await OnClient();
+
+        Delete("configkit-schema-dead.json");
+        HasDeadMember settings = new();
+        Config config = new(Capi, "schema-dead", "schema-dead", settings, "configkit-schema-dead.json");
+
+        Assert.False(config.SettingCodes.Contains("Broken"),
+            "a member that cannot round-trip was given a key in the file");
+
+        string[] notes = config.Definition["settings"].AsArray()
+            .Where(block => block["type"].AsString() == "separator")
+            .Select(block => block["text"].AsString(""))
+            .ToArray();
+
+        Assert.True(notes.Any(note => note.Contains("Broken") && note.Contains("not editable")),
+            $"nothing on screen mentions it; blocks: {string.Join(" | ", notes)}");
+
+        ConfigKit.Gui.ConfigDialog dialog = new(Capi,
+            new Dictionary<string, Config> { ["schema-dead"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(8);
+        dialog.TryClose();
     }
 
     // ---------------------------------------------------------------- guards

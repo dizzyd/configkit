@@ -243,6 +243,30 @@ public class ConfigDialog : GuiDialog
         _ => frame.Node.ElementNode
     };
 
+    /// <summary>
+    /// Puts one field of an object entry back to its class default, as its Reset button does.
+    /// False when this is not an object screen, or the class declares no default for it.
+    /// </summary>
+    public bool ResetField(string label)
+    {
+        if (_stack.Count == 0 || _stack[^1].Node.Kind != SchemaKind.Object) return false;
+
+        ContainerFrame frame = _stack[^1];
+        if (frame.Locked) return false;
+
+        JObject? defaults = Defaults(frame.Node.MemberType);
+
+        foreach (SchemaNode child in frame.Node.Children)
+        {
+            if ((child.Label ?? SchemaBuilder.Humanize(child.Code)) != label) continue;
+            if (defaults?[child.Code] is not JToken value) return false;
+
+            return OnResetField(frame, child.Code, value);
+        }
+
+        return false;
+    }
+
     /// <summary>Goes up one container screen, as the Back button does.</summary>
     public bool Back() => OnBack();
 
@@ -495,7 +519,12 @@ public class ConfigDialog : GuiDialog
         {
             if (block is IFormattingBlock formatting)
             {
-                y = AddFormattingBlock(container, formatting, y);
+                // A filtered list shows what matches. A note about an uneditable member is
+                // not a match for anything the player typed unless its own text says so.
+                if (!filtering || (formatting.Text?.Contains(_filter, StringComparison.OrdinalIgnoreCase) ?? false))
+                {
+                    y = AddFormattingBlock(container, formatting, y);
+                }
                 continue;
             }
 
@@ -1124,6 +1153,11 @@ public class ConfigDialog : GuiDialog
 
         JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
 
+        // A fresh instance of the class is exactly its defaults - the field initialisers the
+        // author wrote. An entry inside a dictionary has no default of its own, which is why
+        // this is offered here and not on the collection screens.
+        JObject? defaults = Defaults(frame.Node.MemberType);
+
         foreach (SchemaNode child in frame.Node.Children)
         {
             if (child.Hidden || (!child.IsSetting && child.Kind != SchemaKind.Object)) continue;
@@ -1156,10 +1190,57 @@ public class ConfigDialog : GuiDialog
 
             AddEntryValue(container, frame, child.Code, label, value, child, controlBounds, key);
 
+            if (!frame.Locked && defaults?[child.Code] is JToken fieldDefault)
+            {
+                AddFieldResetButton(container, frame, child.Code, fieldDefault, y);
+            }
+
             y += RowHeight + RowGap;
         }
 
         return y + 6;
+    }
+
+    private static JObject? Defaults(Type type)
+    {
+        try
+        {
+            object? blank = Activator.CreateInstance(type);
+            return blank == null ? null : JToken.FromObject(blank) as JObject;
+        }
+        catch (Exception)
+        {
+            // No parameterless constructor, or a member Newtonsoft will not serialise. Then
+            // there is no default to offer, and no button.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Puts one field of an object entry back to the value its class declares, in the same
+    /// column the root screen's Reset sits in.
+    /// </summary>
+    private void AddFieldResetButton(GuiElementContainer container, ContainerFrame frame, string field, JToken value, double y)
+    {
+        ElementBounds bounds = ElementBounds.Fixed(
+            LabelWidth + 16 + ControlWidth + ResetGap, y, ResetWidth, RowHeight - 4);
+
+        container.Add(new GuiElementTextButton(capi, "Reset",
+            CairoFont.WhiteDetailText(),
+            CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
+            () => OnResetField(frame, field, value),
+            bounds, EnumButtonStyle.Small));
+
+        container.Add(new GuiElementHoverText(capi,
+            $"Restore this to {value.ToString(Newtonsoft.Json.Formatting.None)}",
+            CairoFont.WhiteDetailText(), 260, bounds.FlatCopy()));
+    }
+
+    private bool OnResetField(ContainerFrame frame, string field, JToken value)
+    {
+        Subtree.SetValue(frame.Setting, frame.Path, field, value.DeepClone());
+        Recompose();
+        return true;
     }
 
     private double LayoutCollectionRows(GuiElementContainer? container, ContainerFrame frame)

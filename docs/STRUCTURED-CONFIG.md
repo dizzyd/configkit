@@ -109,6 +109,10 @@ The value's own fields, each with the right control:
 
 ![One entry's fields](screenshots/ck-5-entry.png)
 
+Each field of an entry has its own **Reset**, back to the value its class declares. An entry
+you added to a dictionary has no default of its own, so that is offered here and not on the
+list screens.
+
 The row label comes from the field marked `[Key]`, falling back to the first string field,
 then `#0`. So you usually annotate nothing — but reach for `[Key]` when the first string
 field is not the identifying one.
@@ -205,8 +209,13 @@ line saying why.
 **Save, Reload and Restore defaults act on the whole config**, from however deep you are.
 Restore asks once, because three levels down it looks local.
 
-**Every public field is accounted for.** Anything ConfigKit can't render is reported at
-registration rather than dropped in silence — look for this in the log:
+**Every public field is accounted for.** A field ConfigKit genuinely can't store — an
+abstract type, a class that holds itself, something nested past five levels — gets no key in
+the file, because a key that can't round-trip is worse than none. But it does get a line on
+the settings screen saying so, next to where it would have been. Reporting it only in the log
+would not count; players don't read the log.
+
+You get the summary there too:
 
 ```
 [ConfigKit] Registered 'danatweaks': 6 settings, 5 sections, 4 containers.

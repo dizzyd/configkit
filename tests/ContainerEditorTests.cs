@@ -430,6 +430,39 @@ public class ContainerEditorTests
         dialog.TryClose();
     }
 
+    /// <summary>
+    /// A field of an object entry has a real default - the initialiser its class declares -
+    /// so it gets a Reset of its own. An entry the player added to a dictionary does not,
+    /// which is why this is offered here and nowhere else.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task AFieldOfAnEntryCanBeResetToItsClassDefault()
+    {
+        await OnClient();
+
+        (ConfigDialog dialog, Settings settings) = Open("edit-fieldreset");
+        await Frames.Wait(6);
+
+        Assert.True(dialog.OpenSetting("Creatures"));
+        await Frames.Wait(4);
+        Assert.True(dialog.OpenEntry("game:wolf-male"));
+        await Frames.Wait(6);
+
+        // The fixture set this away from the class default of 0.5.
+        Assert.Close(0.8f, settings.Creatures["game:wolf-male"].Chance, 0.001f);
+
+        Assert.True(dialog.ResetField("Chance"), "the field had no reset to offer");
+        await Frames.Wait(6);
+
+        Assert.Close(0.5f, settings.Creatures["game:wolf-male"].Chance, 0.001f);
+
+        // And only the one field moved.
+        Assert.Equal("game:wolf-male", settings.Creatures["game:wolf-male"].EntityCode);
+
+        dialog.TryClose();
+    }
+
     // ---------------------------------------------------------------- code hints
 
     /// <summary>
