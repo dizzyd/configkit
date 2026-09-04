@@ -341,6 +341,13 @@ drawing callback. Describe the settings instead — a POCO with `[Description]`,
 are stock .NET, so the settings class keeps no reference to ConfigKit and still compiles without
 it. Forty sliders become forty `[Range]` attributes; it is usually less code than the window was.
 
+**Structured config is no longer the reason to keep the panel.** Roughly half the mods that
+hand-write an ImGui window do it because their config holds dictionaries or nested classes,
+which the declarative format cannot express — so "describe the settings instead" used to mean
+losing them. It does not any more: a sub-object becomes a foldable section and a dictionary
+becomes a screen of its own, with no UI code either way. See
+[STRUCTURED-CONFIG.md](STRUCTURED-CONFIG.md).
+
 Most of these are near-identical — the same `ConfigLibCompatibility` class, constructed from
 `StartPre` behind an `IsModEnabled` guard — so it is largely one boilerplate fix repeated, not
 24 separate problems. Extra Overlays is the one that differs: it reaches configlib entirely

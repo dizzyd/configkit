@@ -161,6 +161,7 @@ All of them are stock .NET. Your settings class keeps no reference to ConfigKit.
 | `[Browsable(false)]` | Hidden from the screen, still saved |
 | `[JsonIgnore]` | Not saved at all |
 | `[Key]` | On a member of a list element: which field labels its row |
+| `[ReadOnly(true)]` | Shown, not editable |
 | `[DataType("blockcode")]` | Keys are block codes, so a typo gets flagged |
 
 The label comes from the field name, tidied up, so `SearchRadius` shows as "Search radius",

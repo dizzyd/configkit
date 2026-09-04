@@ -110,7 +110,8 @@ The value's own fields, each with the right control:
 ![One entry's fields](screenshots/ck-5-entry.png)
 
 The row label comes from the field marked `[Key]`, falling back to the first string field,
-then an overridden `ToString()`, then `#0`. So you usually annotate nothing.
+then `#0`. So you usually annotate nothing — but reach for `[Key]` when the first string
+field is not the identifying one.
 
 ### Nesting costs nothing
 
@@ -142,6 +143,10 @@ All stock .NET. `System.ComponentModel`, `System.ComponentModel.DataAnnotations`
 | `[Browsable(false)]` | Hidden from the screen, **still saved** |
 | `[JsonIgnore]` | **Not saved** and not shown |
 | `[ReadOnly(true)]` | Shown, not editable |
+
+A field with no way to assign it — a `readonly` field, or a get-only property that is not a
+collection — is shown read-only too, without the attribute. Offering a control for one would
+be theatre: the value would be written to the file and never reach your object.
 
 `[Browsable(false)]` and `[JsonIgnore]` are deliberately different. The first is about
 display and keeps the key in the file; the second is about serialisation and removes it.

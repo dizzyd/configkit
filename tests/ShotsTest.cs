@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
@@ -11,6 +12,12 @@ using static VsTestkit.Testing.Vs;
 /// <summary>
 /// Not a test - a scene builder for the documentation screenshots. Shaped like Dana Tweaks,
 /// which is the canonical hand-rolled config in the published corpus.
+///
+/// Guarded by an environment variable rather than [Skip], because the runner checks Skip
+/// after it applies the filter, so a skipped test cannot be run on demand at all. Left to
+/// itself it would take seven screenshots into ~/Pictures on every full suite run.
+///
+///     VSTK_SHOTS=1 bash scripts/run.sh ... --client --filter TakeDocumentationShots
 /// </summary>
 [SingleplayerOnly]
 public class ShotsTest
@@ -101,6 +108,12 @@ public class ShotsTest
     [RequiresClient]
     public async Task TakeDocumentationShots()
     {
+        if (Environment.GetEnvironmentVariable("VSTK_SHOTS") != "1")
+        {
+            Log("set VSTK_SHOTS=1 to regenerate the documentation screenshots");
+            return;
+        }
+
         await OnClient();
 
         string file = "configkit-shots.json";
