@@ -88,6 +88,14 @@ public class ConfigDialog : GuiDialog
     /// Widgets whose value can only be pushed in once the composer has built them.
     private readonly List<Action> _afterCompose = new();
 
+    /// The formatting block behind each heading, so its explanatory line is not lost when the
+    /// block is turned into a fold toggle.
+    private readonly Dictionary<string, IFormattingBlock> _headingBlocks = new();
+
+    /// Every line of prose currently drawn: separator text, and notes about members that
+    /// cannot be edited.
+    private readonly List<string> _notes = new();
+
     public ConfigDialog(ICoreClientAPI capi, Dictionary<string, Config> configs) : base(capi)
     {
         _configs = configs;
@@ -148,6 +156,12 @@ public class ConfigDialog : GuiDialog
                 .Where(block => block.Title != null)
                 .Select(block => block.Title)
                 .ToList();
+
+    /// <summary>
+    /// Every line of prose on screen: a section's explanatory text, and the note beside a
+    /// member ConfigKit cannot store.
+    /// </summary>
+    public IReadOnlyList<string> RenderedNotes => _notes;
 
     /// <summary>The label drawn beside each setting currently on screen.</summary>
     public IReadOnlyList<string> RenderedLabels
@@ -492,11 +506,14 @@ public class ConfigDialog : GuiDialog
         List<(string? section, IConfigBlock block)> blocks = [];
         string? walking = null;
 
+        if (container != null) { _headingBlocks.Clear(); _notes.Clear(); }
+
         foreach ((float _, IConfigBlock block) in config.ConfigBlocks)
         {
             if (block is IFormattingBlock heading && heading.Title != null)
             {
                 walking = heading.Title;
+                _headingBlocks[heading.Title] = heading;
                 continue;
             }
 
@@ -628,7 +645,24 @@ public class ConfigDialog : GuiDialog
                 ElementBounds.Fixed(0, y + 4, width, 26), EnumButtonStyle.Small));
         }
 
-        return y + SectionHeight;
+        y += SectionHeight;
+
+        // A separator carries an explanatory line as well as a title, and turning the block
+        // into a fold toggle threw that line away - a definition that explained its group
+        // lost the explanation with nothing to show it had ever been there.
+        if (!open || !_headingBlocks.TryGetValue(title, out IFormattingBlock? heading) || heading.Text == null)
+        {
+            return y;
+        }
+
+        if (container != null)
+        {
+            container.Add(new GuiElementDynamicText(capi, heading.Text,
+                CairoFont.WhiteDetailText(), ElementBounds.Fixed(0, y, DialogWidth - 40, 24)));
+            _notes.Add(heading.Text);
+        }
+
+        return y + 28;
     }
 
     private bool ToggleSection(string title)
@@ -668,9 +702,14 @@ public class ConfigDialog : GuiDialog
 
         if (block.Text != null)
         {
-            container?.Add(new GuiElementDynamicText(capi,
-                block.Text, CairoFont.WhiteDetailText(),
-                ElementBounds.Fixed(0, y, DialogWidth - 40, 24)));
+            if (container != null)
+            {
+                container.Add(new GuiElementDynamicText(capi,
+                    block.Text, CairoFont.WhiteDetailText(),
+                    ElementBounds.Fixed(0, y, DialogWidth - 40, 24)));
+                _notes.Add(block.Text);
+            }
+
             y += 28;
         }
 
