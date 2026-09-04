@@ -23,15 +23,35 @@ rebuilds and replaces the zips in place.
 
 ## What's in it
 
-Three mods, and the point is the contrast between the first two.
+Three mods built from this repo, and the point is the contrast between the first two.
 
 | mod | what it is |
 |---|---|
-| `configkit` | the library, built from this repo |
+| `configkit` | the library |
 | `configkitdemo` | a **C# settings class**, one section per idea |
 | `configkitdemodef` | the same screen from a **`configlib-patches.json`**, no code at all |
 
-Both appear in the settings screen's dropdown, so you can switch between the two paths.
+Plus ten real mods from ModDB, because the two above are shaped like what I expected to
+find and real definition files are not — Better Ruins alone turned up three defects the test
+suite could not have caught, one of which emptied a mod's config entirely. They are picked
+for variety of shape: both definition formats, with and without asset patches, with and
+without a `file` key, from one setting to fifty-six, and separators declared inline as well
+as in a weighted `formatting` array.
+
+Cairn owns that list. It lives in `pack.json`, and `cairn-cli sync` fetches the right
+version for the game version and pulls in whatever those mods depend on:
+
+```bash
+CAIRN=~/src/cairn/artifacts/osx-arm64/cairn-cli
+
+$CAIRN add configkitdemo <modid>     # add another
+$CAIRN remove configkitdemo <modid>
+$CAIRN sync configkitdemo            # install what the lockfile says
+$CAIRN list
+```
+
+`run.sh` builds the three local mods and drops them in beside those, because Cairn manages
+mods from ModDB and these are not.
 
 ## Things worth trying
 
