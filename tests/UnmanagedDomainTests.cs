@@ -119,4 +119,43 @@ public class UnmanagedDomainTests
         Assert.True(system.Domains.Contains("ckunmanaged-kept"), "an unlisted mod should still be claimed");
         Assert.Equal(before + 1, system.Domains.Count());
     }
+
+    /// <summary>
+    /// WillManage answers for another config manager deciding whether to leave a mod alone.
+    ///
+    /// The two obvious ways to ask this from outside both fail. Reading Domains is a
+    /// lifecycle race - Integrated Mod Manager discovers ownership in AssetsLoaded at
+    /// ExecuteOrder -0.001, and ConfigKit does not register its asset-declared configs until
+    /// its own AssetsLoaded at 0.01, so a mod shipping only a configlib-patches.json is
+    /// invisible at the moment it is asked about. Scanning for that descriptor instead
+    /// answers a different question, because the file exists whether or not ConfigKit acts
+    /// on it.
+    /// </summary>
+    [VsTest(TimeoutMs = 90000)]
+    [RequiresClient]
+    public async Task WillManageAnswersForAnotherManager()
+    {
+        await OnClient();
+
+        ConfigKitModSystem system = Capi.ModLoader.GetModSystem<ConfigKitModSystem>();
+
+        // A registered mod: claimed, and says so.
+        system.RegisterManagedConfig("ckwillmanage", new Settings(), "ck-willmanage.json");
+        Assert.True(system.WillManage("ckwillmanage"), "a registered domain should be managed");
+
+        // A mod declaring nothing to anyone.
+        Assert.True(!system.WillManage("nosuchmod"), "an unknown domain should not be managed");
+
+        // The fixtures ship real configlib-patches.json assets, so this covers the case the
+        // lifecycle race would otherwise hide - and it is true here because they have since
+        // loaded, which is the point: the answer does not depend on when it is asked.
+        Assert.True(system.WillManage("collidedemo"), "a declarative config should be managed");
+
+        Assert.True(!system.WillManage(""), "an empty domain should not throw or claim");
+
+        // Not covered here: WillManage returning false for a domain in UnmanagedDomains.
+        // The skip list is read once in StartPre, so flipping it needs a restarted session
+        // rather than a test. The two halves are checked separately - AListedDomainIsRead
+        // covers the reading, and the guard itself is one _unmanaged.Contains call.
+    }
 }

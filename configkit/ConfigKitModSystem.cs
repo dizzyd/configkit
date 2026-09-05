@@ -385,6 +385,58 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
 
         ConfigsLoaded?.Invoke();
     }
+    /// <summary>
+    /// Whether ConfigKit is, or is going to be, in charge of a mod's config.
+    ///
+    /// For another config manager deciding whether to leave a mod alone. Neither of the two
+    /// obvious ways to ask that from outside actually works:
+    ///
+    /// <list type="bullet">
+    /// <item><description>
+    /// Reading <see cref="Domains"/> is a lifecycle race. C# registrations land in StartPre
+    /// and are there early, but a mod that only ships a configlib-patches.json is not
+    /// registered until this system's AssetsLoaded at ExecuteOrder 0.01 - and a manager
+    /// looking earlier than that sees nothing, for precisely the content mods most likely to
+    /// be described to both.
+    /// </description></item>
+    /// <item><description>
+    /// Scanning for configlib-patches.json assets answers a different question. A descriptor
+    /// exists whether or not ConfigKit will act on it: it stands down entirely when configlib
+    /// or autoconfiglib is installed, and a player can hand any single mod to someone else
+    /// through configkit.json. Ceding to a manager that is not managing leaves the mod with
+    /// no settings screen at all, and nothing saying why.
+    /// </description></item>
+    /// </list>
+    ///
+    /// This answers the real question at any point after assets exist, so a caller does not
+    /// have to reason about load order at all.
+    /// </summary>
+    /// <param name="domain">The mod id to ask about.</param>
+    public bool WillManage(string domain)
+    {
+        if (_api == null || string.IsNullOrWhiteSpace(domain)) return false;
+
+        // Nothing is managed while dormant, and nothing listed is managed ever.
+        if (_standingDown || _unmanaged.Contains(domain)) return false;
+
+        // Already claimed - a registration, or an asset already read.
+        if (_domains.Contains(domain)) return true;
+
+        // Not yet claimed, but declared: this is what LoadConfigs will pick up.
+        try
+        {
+            return _api.Assets.GetMany(AssetCategory.config.Code)
+                .Any(asset => asset.Name == "configlib-patches.json"
+                           && string.Equals(asset.Location.Domain, domain, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception)
+        {
+            // Assets are not readable before AssetsLoaded. Being asked that early can only
+            // mean the answer is "whatever has registered so far", which is the check above.
+            return false;
+        }
+    }
+
     private void LoadConfigs()
     {
         if (_api == null) return;

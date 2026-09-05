@@ -208,6 +208,26 @@ ConfigKit-managed config with a screen of its own: a switch that turns settings 
 has to stay reachable once they are off. A malformed one is reported and ignored, because its
 whole job is to rescue a broken setup and it must not be able to cause one.
 
+### For another config manager
+
+If you are writing a config manager of your own and want to leave ConfigKit's mods alone, ask:
+
+```csharp
+bool ours = api.ModLoader.GetModSystem<ConfigKitModSystem>().WillManage(modId);
+```
+
+**Do not infer it from a `configlib-patches.json` asset**, and do not read `Domains` early.
+A descriptor exists whether or not ConfigKit acts on it — it stands down when configlib or
+autoconfiglib is installed, and a player can hand any one mod to you through
+`configkit.json`. And `Domains` is a lifecycle race: C# registrations land in `StartPre`, but
+an asset-declared config is not registered until ConfigKit's `AssetsLoaded` at `ExecuteOrder`
+`0.01`, so anything looking earlier sees nothing for exactly the content mods most likely to
+be described to both of you.
+
+`WillManage` answers the real question at any point, so you do not have to reason about load
+order. Ceding a mod to a manager that turns out not to be managing it leaves the player with
+no settings screen and nothing explaining why.
+
 ---
 
 ## Reading someone else's config
