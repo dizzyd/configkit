@@ -1,0 +1,10 @@
+{
+    "type": "content",
+    "modid": "ckgolden",
+    "name": "ConfigKit compatibility baseline",
+    "description": "What ConfigKit v1.2.0 did with ten real mods' configs, after every setting was edited off its default. Carried as an asset because the test harness exposes no path to its own suite directory. Regenerate with tests/golden/CaptureGolden.cs against a worktree of the released tag.",
+    "authors": ["Dave (Dizzy) Smith"],
+    "version": "1.0.0",
+    "dependencies": { "game": "1.22.0" },
+    "side": "universal"
+}
