@@ -61,6 +61,16 @@ internal sealed class SchemaNode
     /// </summary>
     public string? Format;
     /// <summary>
+    /// True for a nullable value type - int?, float?, bool?, an enum? - where null is a
+    /// value the author means, distinct from zero or false. WearAndTear's MaintenanceLimit
+    /// is the case that forced this: null is "no limit" and 0 is "no repair allowed", so
+    /// rendering the null as 0 states the opposite of what is stored.
+    ///
+    /// Not set for reference types. A string or a class is always nullable and nothing about
+    /// its control changes; this exists to decide whether a *number* needs a way to be empty.
+    /// </summary>
+    public bool Nullable;
+    /// <summary>
     /// Which section this member belongs to, as an identity rather than a caption:
     /// "cat:Doors" for a name the author chose, or the owning object's path for one derived
     /// from a class. The two namespaces cannot collide, which a shared display name could -
@@ -374,7 +384,10 @@ internal static class SchemaBuilder
     /// </summary>
     private static void Classify(SchemaNode node, Stack<Type> visiting, int depth, List<string> notices, int[] position)
     {
-        Type type = Nullable.GetUnderlyingType(node.MemberType) ?? node.MemberType;
+        Type? underlying = Nullable.GetUnderlyingType(node.MemberType);
+        Type type = underlying ?? node.MemberType;
+
+        node.Nullable = underlying != null;
 
         ConfigSettingType scalar = ScalarTypeOf(type);
         if (scalar != ConfigSettingType.None)

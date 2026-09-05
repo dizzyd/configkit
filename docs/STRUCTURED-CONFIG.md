@@ -336,6 +336,24 @@ reaches your object as null, not as `""` or `0`, so a mod that reads null as "no
 configured" keeps that distinction. A non-nullable value type cannot take one and keeps the
 converted value instead.
 
+A **nullable value type** — `int?`, `float?`, `bool?` — also gets a control that can *say*
+null, because for these null is a value and not merely an absence:
+
+```csharp
+/// <summary>How much durability can be repaired. Unset means no limit.</summary>
+[Range(0, double.PositiveInfinity)]
+public float? MaintenanceLimit { get; set; }        // null is not 0
+```
+
+- a number reads **empty** when it is null, and clearing the box sets it back to null
+- it takes the number input rather than a slider, because a slider has no position for unset
+- a `bool?` is a three-way dropdown — `(unset)`, `true`, `false` — rather than a switch
+- an enum or `[AllowedValues]` dropdown gains an `(unset)` entry
+
+Without that, null showed as `0` and could never be typed back — which for the member above
+means the screen said "no repair allowed" about a config that said "no limit", and the first
+edit made it so.
+
 Anything else Newtonsoft can round-trip is shown as raw JSON, which is honest and editable.
 Anything it can't is reported and left alone.
 

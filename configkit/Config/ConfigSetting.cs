@@ -63,6 +63,15 @@ public class ConfigSetting : ISetting
     /// from [DisplayFormat]. Display only; the stored value is never formatted.
     /// </summary>
     public string? Format { get; internal set; }
+
+    /// <summary>
+    /// Whether null is one of this setting's values, as against the absence of one. True only
+    /// for a nullable value type; see SchemaNode.Nullable.
+    /// </summary>
+    public bool Nullable { get; internal set; }
+
+    /// <summary>Whether this setting currently holds null.</summary>
+    public bool IsNull => Value.Token == null || Value.Token.Type == JTokenType.Null;
     /// <summary>
     /// The member this setting was reflected from, for a managed config. Null for one built
     /// from a definition file, which has no class behind it.
@@ -124,6 +133,7 @@ public class ConfigSetting : ISetting
         MappingKey = previous.MappingKey;
         Comment = previous.Comment;
         Format = previous.Format;
+        Nullable = previous.Nullable;
         Validation = previous.Validation;
         SortingWeight = previous.SortingWeight;
         InGui = previous.InGui;
@@ -247,7 +257,7 @@ public class ConfigSetting : ISetting
     /// </summary>
     private bool CanTakeNull(Type memberType)
         => !memberType.IsValueType
-           || (Nullable.GetUnderlyingType(memberType) != null && StoredNull);
+           || (System.Nullable.GetUnderlyingType(memberType) != null && StoredNull);
 
 
     ///
@@ -260,7 +270,7 @@ public class ConfigSetting : ISetting
     /// </summary>
     private object? CoerceTo(Type memberType)
     {
-        Type type = Nullable.GetUnderlyingType(memberType) ?? memberType;
+        Type type = System.Nullable.GetUnderlyingType(memberType) ?? memberType;
 
         // A mapped setting - an enum is modelled as one - keeps the mapping key in Value and
         // the value it stands for in the mapping. Reading Value directly yields the key's
@@ -279,7 +289,7 @@ public class ConfigSetting : ISetting
         // because assigning null to an int field throws and would drop the member entirely.
         if (value.Token == null || value.Token.Type == JTokenType.Null)
         {
-            if (!memberType.IsValueType || Nullable.GetUnderlyingType(memberType) != null) return null;
+            if (!memberType.IsValueType || System.Nullable.GetUnderlyingType(memberType) != null) return null;
         }
 
         try
@@ -541,6 +551,7 @@ public class ConfigSetting : ISetting
             Value = json["default"],
             Comment = json["comment"].AsString(),
             Format = json["format"].AsString(),
+            Nullable = json["nullable"].AsBool(false),
             InGui = json["ingui"].AsString(json["nameInGui"].AsString(json["name"].AsString(code))),
             ClientSide = json["clientSide"].AsBool(false),
             SortingWeight = json["weight"].AsFloat(0),

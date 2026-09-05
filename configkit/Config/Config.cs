@@ -867,6 +867,7 @@ public sealed class Config : IConfig, IDisposable
 
         if (node.Comment != null) definition.Add("comment", node.Comment);
         if (node.Format != null) definition.Add("format", node.Format);
+        if (node.Nullable) definition.Add("nullable", true);
         if (node.ClientSide) definition.Add("clientSide", true);
         if (node.Logarithmic) definition.Add("logarithmic", true);
         if (node.Hidden) definition.Add("hide", true);
@@ -910,6 +911,7 @@ public sealed class Config : IConfig, IDisposable
 
         if (node.Comment != null) definition.Add("comment", node.Comment);
         if (node.Format != null) definition.Add("format", node.Format);
+        if (node.Nullable) definition.Add("nullable", true);
         if (node.ClientSide) definition.Add("clientSide", true);
         if (node.Hidden) definition.Add("hide", true);
         if (node.ReadOnly) definition.Add("readonly", true);

@@ -155,23 +155,41 @@ public class ConfigDialog : GuiDialog
     }
 
     /// <summary>
+    /// What a setting's text control currently shows, by yaml code. A nullable number reads
+    /// empty when it holds null, which is the whole point of it and not visible in the value.
+    /// </summary>
+    public string NumberTextFor(string yamlCode)
+        => WidgetFor(yamlCode) is GuiElementEditableTextBase text ? text.GetText() : "";
+
+    /// <summary>
+    /// Types into a setting's text control the way a player does - through the widget, so the
+    /// change runs the handler the widget was built with rather than a path only a test uses.
+    /// </summary>
+    public bool TypeInto(string yamlCode, string text)
+    {
+        if (WidgetFor(yamlCode) is not GuiElementEditableTextBase editable) return false;
+
+        editable.SetValue(text);
+        return true;
+    }
+
+    private GuiElement? WidgetFor(string yamlCode)
+    {
+        foreach ((string key, ConfigSetting setting) in _settingsByKey)
+        {
+            if (setting.YamlCode == yamlCode && _widgets.TryGetValue(key, out GuiElement? widget)) return widget;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// The class name of the control a setting was actually given, by yaml code, or "" if
     /// it is not on screen. Which control a range gets is a decision in its own right - an
     /// open bound has to become a number input rather than a slider - and asserting on the
     /// range alone cannot see it.
     /// </summary>
-    public string ControlKindFor(string yamlCode)
-    {
-        foreach ((string key, ConfigSetting setting) in _settingsByKey)
-        {
-            if (setting.YamlCode == yamlCode && _widgets.TryGetValue(key, out GuiElement? widget))
-            {
-                return widget.GetType().Name;
-            }
-        }
-
-        return "";
-    }
+    public string ControlKindFor(string yamlCode) => WidgetFor(yamlCode)?.GetType().Name ?? "";
 
     /// <summary>
     /// Restores one rendered setting to its default, exactly as that row's Reset button
@@ -833,10 +851,36 @@ public class ConfigDialog : GuiDialog
     private static string ValueText(ConfigSetting setting)
         => setting.MappingKey ?? setting.Value.Token?.ToString() ?? "";
 
+    /// <summary>
+    /// The number as text. A null on a nullable setting is an empty string, never "0":
+    /// AsFloat on a null token returns zero, and for a member whose null means "no limit"
+    /// while zero means "none allowed", showing the zero states the opposite of the truth.
+    /// </summary>
     private static string NumberText(ConfigSetting setting)
-        => setting.SettingType == ConfigSettingType.Float
+    {
+        if (setting.Nullable && setting.IsNull) return "";
+
+        return setting.SettingType == ConfigSettingType.Float
             ? setting.Value.AsFloat().ToString(System.Globalization.CultureInfo.InvariantCulture)
             : setting.Value.AsInt().ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>What the dropdown shows for a bool? - "", "true" or "false".</summary>
+    private static string NullableBoolText(ConfigSetting setting)
+        => setting.IsNull ? NullChoice : (setting.Value.AsBool() ? "true" : "false");
+
+    /// <summary>
+    /// The caption for "no value" in a dropdown. Blank would be invisible and unclickable,
+    /// so it is a word, and one no enum member or allowed value is likely to collide with.
+    /// </summary>
+    private const string NullChoice = "(unset)";
+
+    /// <summary>A dropdown's choices, with the unset option in front where null is a value.</summary>
+    private static string[] WithBlank(ConfigSetting setting, IEnumerable<string> choices)
+        => setting.Nullable ? [NullChoice, .. choices] : [.. choices];
+
+    private static bool IsBlank(ConfigSetting setting, string choice)
+        => setting.Nullable && choice == NullChoice;
 
     /// <summary>
     /// The same number as the author would write it: NumberText, then any [DisplayFormat] on
@@ -888,10 +932,15 @@ public class ConfigDialog : GuiDialog
 
         if (validation?.Mapping != null)
         {
-            string[] keys = validation.Mapping.Keys.ToArray();
+            string[] keys = WithBlank(setting, validation.Mapping.Keys);
             int selected = Math.Max(0, Array.IndexOf(keys, setting.MappingKey ?? ""));
             Remember(key, container, new GuiElementDropDown(capi, keys, keys, selected,
-                (code, on) => { if (on) setting.MappingKey = code; },
+                (code, on) =>
+                {
+                    if (!on) return;
+                    if (IsBlank(setting, code)) setting.Value = FromNull();
+                    else setting.MappingKey = code;
+                },
                 bounds, CairoFont.WhiteDetailText(), false));
             return;
         }
@@ -901,22 +950,43 @@ public class ConfigDialog : GuiDialog
             // Render the raw token, not AsString: JsonObject.AsString returns the default
             // for anything that is not literally a string, so a list of numbers came out as
             // blank rows and wrote an empty string back into the setting.
-            string[] values = validation.Values.Select(TokenText).ToArray();
+            string[] values = WithBlank(setting, validation.Values.Select(TokenText));
             int selected = Math.Max(0, Array.IndexOf(values, TokenText(setting.Value)));
             Remember(key, container, new GuiElementDropDown(capi, values, values, selected,
-                (code, on) => { if (on) SetFromText(setting, code); },
+                (code, on) =>
+                {
+                    if (!on) return;
+                    if (IsBlank(setting, code)) setting.Value = FromNull();
+                    else SetFromText(setting, code);
+                },
                 bounds, CairoFont.WhiteDetailText(), false));
             return;
         }
 
         switch (setting.SettingType)
         {
+            // A switch has two positions and bool? has three states, so a nullable one gets
+            // the dropdown instead - otherwise null reads as false, which is a value.
+            case ConfigSettingType.Boolean when setting.Nullable:
+                string[] choices = [NullChoice, "true", "false"];
+                Remember(key, container, new GuiElementDropDown(capi, choices, choices,
+                    Math.Max(0, Array.IndexOf(choices, NullableBoolText(setting))),
+                    (code, on) =>
+                    {
+                        if (!on) return;
+                        setting.Value = code == NullChoice ? FromNull() : FromBool(code == "true");
+                    },
+                    bounds, CairoFont.WhiteDetailText(), false));
+                break;
+
             case ConfigSettingType.Boolean:
                 Remember(key, container, new GuiElementSwitch(capi, on => setting.Value = FromBool(on), bounds));
                 break;
 
-            case ConfigSettingType.Integer when HasRange(setting):
-            case ConfigSettingType.Float when HasRange(setting):
+            // A slider has a position for every value in its range and none for "unset", so
+            // a nullable number takes the input, where clearing the box is how null is said.
+            case ConfigSettingType.Integer when HasRange(setting) && !setting.Nullable:
+            case ConfigSettingType.Float when HasRange(setting) && !setting.Nullable:
                 AddSliderControl(container, setting, bounds, key);
                 break;
 
@@ -1200,18 +1270,34 @@ public class ConfigDialog : GuiDialog
         // when the value changes underneath them - a reset, or a reload from file.
         if (validation?.Mapping != null)
         {
-            if (widget is GuiElementDropDown mapped) mapped.SetSelectedValue(setting.MappingKey ?? "");
+            if (widget is GuiElementDropDown mapped)
+            {
+                mapped.SetSelectedValue(setting.Nullable && setting.IsNull
+                    ? NullChoice
+                    : setting.MappingKey ?? "");
+            }
             return;
         }
 
         if (validation?.Values != null)
         {
-            if (widget is GuiElementDropDown listed) listed.SetSelectedValue(TokenText(setting.Value));
+            if (widget is GuiElementDropDown listed)
+            {
+                listed.SetSelectedValue(setting.Nullable && setting.IsNull
+                    ? NullChoice
+                    : TokenText(setting.Value));
+            }
             return;
         }
 
         switch (widget)
         {
+            // A bool? is a dropdown rather than a switch, and reaches here with no mapping
+            // or value list to have been caught by the branches above.
+            case GuiElementDropDown tristate when setting.SettingType == ConfigSettingType.Boolean:
+                tristate.SetSelectedValue(NullableBoolText(setting));
+                break;
+
             case GuiElementSwitch toggle:
                 toggle.On = setting.Value.AsBool();
                 break;
@@ -1342,9 +1428,21 @@ public class ConfigDialog : GuiDialog
 
     private static void OnNumberTyped(ConfigSetting setting, string text)
     {
+        // An empty box on a nullable setting is null, which is the only way a player has of
+        // putting one back once they have typed a number over it.
+        if (setting.Nullable && string.IsNullOrWhiteSpace(text))
+        {
+            setting.Value = FromNull();
+            return;
+        }
+
         if (setting.SettingType == ConfigSettingType.Float)
         {
-            if (float.TryParse(text, out float parsed)) setting.Value = FromFloat(parsed);
+            if (float.TryParse(text, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out float parsed))
+            {
+                setting.Value = FromFloat(parsed);
+            }
         }
         else if (int.TryParse(text, out int parsed)) setting.Value = FromInt(parsed);
     }
@@ -1358,6 +1456,9 @@ public class ConfigDialog : GuiDialog
     }
 
     private static JsonObject FromBool(bool value) => new(new JValue(value));
+
+    /// <summary>The "no value" a nullable setting can be put back to.</summary>
+    private static JsonObject FromNull() => new(JValue.CreateNull());
     private static JsonObject FromInt(int value) => new(new JValue(value));
     private static JsonObject FromFloat(float value) => new(new JValue(value));
     private static JsonObject FromString(string value) => new(new JValue(value));
