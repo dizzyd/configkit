@@ -200,7 +200,7 @@ public class ConfigSetting : ISetting
         }
 
         object? value = CoerceTo(property.PropertyType);
-        if (value == null && property.PropertyType.IsValueType) return false;
+        if (value == null && !CanTakeNull(property.PropertyType)) return false;
 
         property.SetValue(target, value);
         return true;
@@ -216,14 +216,33 @@ public class ConfigSetting : ISetting
         }
 
         object? value = CoerceTo(field.FieldType);
-        if (value == null && field.FieldType.IsValueType) return false;
+        if (value == null && !CanTakeNull(field.FieldType)) return false;
 
         field.SetValue(target, value);
         return true;
     }
 
     /// <summary>
-    /// Converts this setting's value to the member's own declared type.
+    /// Whether what is stored is literally null, as against a value that failed to convert.
+    /// The two both arrive at the member as null and mean opposite things: one is the
+    /// author's own "not set", the other is a conversion this library could not do, where
+    /// leaving the class default alone is the safer answer.
+    /// </summary>
+    private bool StoredNull => Value.Token == null || Value.Token.Type == JTokenType.Null;
+
+    /// <summary>
+    /// Converts this setting's value to the member's own declared type.    /// <summary>
+    /// Whether null may be written to a member of this type. A reference type always takes
+    /// it; a nullable value type takes it only when the null is really what was stored -
+    /// Nullable&lt;int&gt; reports IsValueType true, which is why an int? left unset used to be
+    /// skipped rather than nulled. A plain value type never does, because assigning null to
+    /// an int field throws and would cost the member its value entirely.
+    /// </summary>
+    private bool CanTakeNull(Type memberType)
+        => !memberType.IsValueType
+           || (Nullable.GetUnderlyingType(memberType) != null && StoredNull);
+
+
     ///
     /// The settings model has one floating point type and one integer type, but a config
     /// class does not: a <c>double</c> field is classified as Float, and assigning a
@@ -244,6 +263,16 @@ public class ConfigSetting : ISetting
             && Validation.Mapping.TryGetValue(MappingKey, out JsonObject? mapped))
         {
             value = mapped;
+        }
+
+        // A stored null is a value, not an absence. A mod that declares a nullable member and
+        // distinguishes "no code set" from "the empty code" gets that distinction back;
+        // coercing null to "" or 0 changes what its own config says without telling it.
+        // Only where null actually fits: a non-nullable value type keeps the old coercion,
+        // because assigning null to an int field throws and would drop the member entirely.
+        if (value.Token == null || value.Token.Type == JTokenType.Null)
+        {
+            if (!memberType.IsValueType || Nullable.GetUnderlyingType(memberType) != null) return null;
         }
 
         try

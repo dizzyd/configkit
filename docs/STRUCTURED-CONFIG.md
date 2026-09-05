@@ -141,7 +141,7 @@ All stock .NET. `System.ComponentModel`, `System.ComponentModel.DataAnnotations`
 | Attribute | Effect |
 |---|---|
 | `[Description("…")]` | Hover text on the label |
-| `[Range(min, max)]` | Slider instead of a text box |
+| `[Range(min, max)]` | Slider instead of a text box — but see *Open bounds* below |
 | `[DefaultValue(x)]` | The value Reset goes back to |
 | `[AllowedValues(…)]` | Dropdown of fixed choices |
 | `[Category("Doors")]` | Puts the setting in a section called Doors |
@@ -190,6 +190,25 @@ source order across the two kinds, so fields are listed in the order you wrote t
 properties follow. Use `[Display(Order)]` if you need them interleaved. And a **section name
 may contain a comma** — `[Category("Yours, not the server's, clientside")]` is a section
 called "Yours, not the server's" with the `clientside` flag, not two sections.
+
+### Open bounds
+
+`[Range]` gives you a slider, but only where a slider makes sense. These are all idiomatic
+and none of them becomes one:
+
+```csharp
+[Range(0, double.PositiveInfinity)] public float FreezingDamage = 1f;
+[Range(1, int.MaxValue)]            public int  PollIntervalMs  = 500;
+```
+
+They say "no upper limit", not "a slider two billion units wide", so the setting keeps the
+plain number input and the range still validates. A bound is treated as open when it is
+infinite, or when the span is wider than a million steps at the scale the slider would use —
+past that a pixel is thousands of units and no particular value can be chosen anyway.
+
+Write the bound you mean. An honest `[Range(0, 10)]` gets the slider; reaching for
+`int.MaxValue` to mean "any positive number" gets the text box, which is the better control
+for it.
 
 ### `[DataType]`, and why it earns its place
 
@@ -267,6 +286,11 @@ and migrate it" field keeps working.
 
 **Get-only collections** — `public List<string> X { get; } = new();` is filled in place
 rather than replaced, so a reference your mod took to that list stays live.
+
+**Nullable members** — `string?`, `int?`, a class or a container left unset. A stored null
+reaches your object as null, not as `""` or `0`, so a mod that reads null as "not
+configured" keeps that distinction. A non-nullable value type cannot take one and keeps the
+converted value instead.
 
 Anything else Newtonsoft can round-trip is shown as raw JSON, which is honest and editable.
 Anything it can't is reported and left alone.

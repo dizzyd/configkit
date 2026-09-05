@@ -148,6 +148,25 @@ public class ConfigDialog : GuiDialog
     }
 
     /// <summary>
+    /// The class name of the control a setting was actually given, by yaml code, or "" if
+    /// it is not on screen. Which control a range gets is a decision in its own right - an
+    /// open bound has to become a number input rather than a slider - and asserting on the
+    /// range alone cannot see it.
+    /// </summary>
+    public string ControlKindFor(string yamlCode)
+    {
+        foreach ((string key, ConfigSetting setting) in _settingsByKey)
+        {
+            if (setting.YamlCode == yamlCode && _widgets.TryGetValue(key, out GuiElement? widget))
+            {
+                return widget.GetType().Name;
+            }
+        }
+
+        return "";
+    }
+
+    /// <summary>
     /// Restores one rendered setting to its default, exactly as that row's Reset button
     /// does. Returns false if the window is not showing a setting with that code.
     /// </summary>
@@ -873,8 +892,8 @@ public class ConfigDialog : GuiDialog
                 Remember(key, container, new GuiElementSwitch(capi, on => setting.Value = FromBool(on), bounds));
                 break;
 
-            case ConfigSettingType.Integer when HasRange(validation):
-            case ConfigSettingType.Float when HasRange(validation):
+            case ConfigSettingType.Integer when HasRange(setting):
+            case ConfigSettingType.Float when HasRange(setting):
                 AddSliderControl(container, setting, bounds, key);
                 break;
 
@@ -1093,8 +1112,42 @@ public class ConfigDialog : GuiDialog
         };
     }
 
-    private static bool HasRange(Validation? validation)
-        => validation?.Minimum != null && validation?.Maximum != null;
+    /// <summary>
+    /// Whether a declared range can actually be a slider.
+    ///
+    /// Sliders are integer-only, so both bounds have to survive the trip through
+    /// <see cref="ToSliderInt"/>, and a great many real configs declare bounds that do not.
+    /// An unbounded maximum is idiomatic - <c>[Range(0, double.PositiveInfinity)]</c> for a
+    /// multiplier, <c>[Range(1, int.MaxValue)]</c> for an interval in milliseconds - and it
+    /// means "no upper limit", not "a slider two billion units wide". Converting infinity to
+    /// int saturates at int.MaxValue rather than throwing, so the range survives the maths
+    /// and only falls over later, in the widget, taking the client down with it.
+    ///
+    /// A range that cannot be a slider is not discarded: it still validates, the setting just
+    /// gets the plain number input, which is the only sensible control for an open bound
+    /// anyway. This is what AutoConfigLib does with the same attributes.
+    /// </summary>
+    private static bool HasRange(ConfigSetting setting)
+    {
+        Validation? validation = setting.Validation;
+        if (validation?.Minimum == null || validation.Maximum == null) return false;
+
+        float min = validation.Minimum.AsFloat();
+        float max = validation.Maximum.AsFloat();
+
+        if (!float.IsFinite(min) || !float.IsFinite(max) || max <= min) return false;
+
+        // The span is measured at the scale the slider would actually use, because that is
+        // what has to fit in an int - and in something a player can drag.
+        double steps = (double)(max - min) * ScaleFor(setting);
+        return steps >= 1 && steps <= MaxSliderSteps;
+    }
+
+    /// <summary>
+    /// The widest slider worth drawing. Past this the control is a worse number input: a
+    /// pixel is thousands of units, so no particular value can be chosen with it.
+    /// </summary>
+    private const int MaxSliderSteps = 1_000_000;
 
     /// <summary>
     /// Pushes current values into the widgets. They are held by reference rather than
