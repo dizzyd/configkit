@@ -36,6 +36,26 @@ void RegisterManagedConfig(
 `RegisterCustomManagedConfig` is the same method under configlib's name, kept so a mod that
 looks it up by reflection finds it.
 
+**Both signatures are frozen.** Adding even an optional parameter to them is source
+compatible and binary incompatible: your mod, compiled against one release, emits a call
+naming that exact signature, and a later release that added a parameter no longer has it.
+The failure is a `MissingMethodException` at registration rather than a compile error.
+Anything new therefore arrives as a method of its own, as `SetConfigDisplayName` did, and
+`DocsAndFormatTests` fails if either signature drifts.
+
+### Naming a config in the dropdown
+
+The dropdown shows the name of the mod whose id is the domain. A mod registering **several**
+configs needs a domain each, and none of them is its mod id — so those show the raw domain
+until you say otherwise:
+
+```csharp
+system.RegisterManagedConfig("mymod-server", ServerConfig, "mymod/server.json");
+system.SetConfigDisplayName("mymod-server", "My Mod: Server");
+```
+
+The list sorts by that name, so a mod's configs sit together.
+
 That first snippet assumes ConfigKit is installed. If it might not be, see *Making it
 optional* below — it is not as simple as a null check.
 
@@ -208,6 +228,7 @@ Common answers:
 | no settings screen at all | `configlib` or `autoconfiglib` is installed; ConfigKit stood down |
 | one field missing, no log line | it is `[JsonIgnore]`, or `[Browsable(false)]` — the latter is still in the file |
 | a field shows as raw JSON | nothing can edit that type; it still round-trips |
+| a setting has no tooltip | no `[Description]`, and no `.xml` doc file shipped beside the dll |
 | a field says *not editable* | nothing can construct it — an interface, an abstract class, or a cycle |
 | a key marked with `!` | `[DataType("blockcode")]` and the key names nothing loaded |
 | values reverted on upgrade | file a bug — see [regression-review-2026-09.md](regression-review-2026-09.md) for the shape of these |

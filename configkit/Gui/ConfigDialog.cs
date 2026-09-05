@@ -36,7 +36,9 @@ public class ConfigDialog : GuiDialog
     private const double RowGap = 6;
     private const double LabelWidth = 320;
     private const double ControlWidth = 250;
-    private const double ValueWidth = 54;
+    // Wide enough for a formatted readout, not just a bare number: [DisplayFormat] turns
+    // 0.95 into "95.00 %", which wrapped onto a second line at the 54 this used to be.
+    private const double ValueWidth = 78;
     private const double ResetWidth = 56;
     private const double ResetGap = 14;
 
@@ -120,6 +122,11 @@ public class ConfigDialog : GuiDialog
     /// composed, and rebuilt whenever the selected mod changes.
     /// </summary>
     public IReadOnlyDictionary<string, ConfigSetting> RenderedSettings => _settingsByKey;
+
+    /// <summary>
+    /// What the mod dropdown offers, in the order a player sees it.
+    /// </summary>
+    public IReadOnlyList<string> DisplayNames => _domains.Select(DisplayName).ToList();
 
     /// <summary>
     /// What each slider's readout currently says, keyed by the setting's yaml code. The
@@ -831,6 +838,22 @@ public class ConfigDialog : GuiDialog
             ? setting.Value.AsFloat().ToString(System.Globalization.CultureInfo.InvariantCulture)
             : setting.Value.AsInt().ToString(System.Globalization.CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// The same number as the author would write it: NumberText, then any [DisplayFormat] on
+    /// top. A ratio declared with "P" reads 95% rather than 0.95, which is how the setting is
+    /// described everywhere except in the file.
+    ///
+    /// Only for text a player reads, never for text a player edits - see FormatString in the
+    /// schema builder. An editable control keeps the raw number so that what is typed and what
+    /// is stored are the same string.
+    /// </summary>
+    private static string ReadoutText(ConfigSetting setting) => Formatted(setting, NumberText(setting));
+
+    private static string Formatted(ConfigSetting setting, string fallback)
+        => setting.SettingType == ConfigSettingType.Float
+            ? Format(setting, setting.Value.AsFloat(), () => fallback)
+            : Format(setting, setting.Value.AsInt(), () => fallback);
+
     private static string LabelFor(ConfigSetting setting)
     {
         string? label = setting.InGui;
@@ -1005,13 +1028,13 @@ public class ConfigDialog : GuiDialog
         ElementBounds valueBounds = ElementBounds.Fixed(
             bounds.fixedX + bounds.fixedWidth - ValueWidth, bounds.fixedY + 2, ValueWidth, bounds.fixedHeight);
 
-        GuiElementDynamicText readout = new(capi, NumberText(setting),
+        GuiElementDynamicText readout = new(capi, ReadoutText(setting),
             CairoFont.WhiteDetailText().WithOrientation(EnumTextOrientation.Right), valueBounds);
 
         GuiElementSlider slider = new(capi, value =>
         {
             bool handled = OnSlider(setting, value);
-            readout.SetNewText(NumberText(setting));
+            readout.SetNewText(ReadoutText(setting));
             return handled;
         }, sliderBounds);
 
@@ -1201,7 +1224,7 @@ public class ConfigDialog : GuiDialog
                     Math.Max(1, validation.Step == null ? 1 : ToSliderInt(setting, validation.Step)));
                 if (_sliderValues.TryGetValue(key, out GuiElementDynamicText? readout))
                 {
-                    readout.SetNewText(NumberText(setting));
+                    readout.SetNewText(ReadoutText(setting));
                 }
                 break;
 
@@ -1266,9 +1289,43 @@ public class ConfigDialog : GuiDialog
 
     /// <summary>The real value behind a slider position, as the readout beside it would write it.</summary>
     private static string SliderText(ConfigSetting setting, int value)
-        => setting.SettingType == ConfigSettingType.Float
-            ? (value / (float)ScaleFor(setting)).ToString(System.Globalization.CultureInfo.InvariantCulture)
-            : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    {
+        // The tooltip that follows a drag reads a slider position rather than the stored
+        // value, so it formats the number it was handed instead of going through Formatted.
+        if (setting.SettingType != ConfigSettingType.Float)
+        {
+            return Format(setting, value, () => value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        float real = value / (float)ScaleFor(setting);
+        return Format(setting, real, () => real.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// One number through the author's [DisplayFormat], with the raw text as the answer
+    /// whenever that does not work out.
+    ///
+    /// Two ways it does not. A malformed standard format throws. Worse, one that is merely
+    /// wrong does not: .NET reads any unrecognised string as a *custom* format, in which a
+    /// letter that is not a specifier stands for itself - so a typo'd format renders the
+    /// number as prose, silently, with no digits left in it. That is the check below: a
+    /// formatted number with no digit in it is not a formatted number.
+    /// </summary>
+    private static string Format<T>(ConfigSetting setting, T value, Func<string> fallback) where T : IFormattable
+    {
+        if (setting.Format is not { Length: > 0 } format) return fallback();
+
+        try
+        {
+            string text = value.ToString(format, System.Globalization.CultureInfo.InvariantCulture);
+
+            return text.Any(char.IsDigit) ? text : fallback();
+        }
+        catch (FormatException)
+        {
+            return fallback();
+        }
+    }
 
     private static int ToSliderInt(ConfigSetting setting, JsonObject value)
         => setting.SettingType == ConfigSettingType.Float

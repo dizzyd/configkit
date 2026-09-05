@@ -55,6 +55,12 @@ internal sealed class SchemaNode
     public string? Label;
     public string? Comment;
     /// <summary>
+    /// A .NET format string from [DisplayFormat(DataFormatString = "...")], applied when a
+    /// number is written out - "P" for a ratio a player thinks of as a percentage, "N2" for
+    /// one that should not sprawl. Display only: the value stored is untouched.
+    /// </summary>
+    public string? Format;
+    /// <summary>
     /// Which section this member belongs to, as an identity rather than a caption:
     /// "cat:Doors" for a name the author chose, or the owning object's path for one derived
     /// from a class. The two namespaces cannot collide, which a shared display name could -
@@ -261,9 +267,14 @@ internal static class SchemaBuilder
             Code = JsonPropertyName(member) ?? member.Name,
             Hidden = member.GetCustomAttribute<BrowsableAttribute>()?.Browsable == false,
             ReadOnly = IsReadOnly(member),
-            Comment = member.GetCustomAttribute<DescriptionAttribute>()?.Description,
+            // [Description] first, then the member's own /// doc comment. The attribute was
+            // written to be shown; the doc comment was written for a reader of the source and
+            // is merely the best thing available when nobody wrote the attribute.
+            Comment = member.GetCustomAttribute<DescriptionAttribute>()?.Description
+                      ?? XmlDocs.Summary(member),
             Label = ExplicitLabel(member),
             KeySource = member.GetCustomAttribute<DataTypeAttribute>()?.CustomDataType,
+            Format = FormatString(member),
 
             // A member that said nothing sorts after every member that did, which is the
             // convention DataAnnotations itself uses - DisplayAttribute.Order documents 10000
@@ -574,6 +585,22 @@ internal static class SchemaBuilder
         if (!string.IsNullOrWhiteSpace(name)) return name;
 
         return null;
+    }
+
+    /// <summary>
+    /// The display format an author declared, if any.
+    ///
+    /// [DisplayFormat] also carries ApplyFormatInEditMode, which is false by default and
+    /// deliberately not honoured: formatting the text a player types into means parsing it
+    /// back out, and "95%" has to survive a round trip through a control that also has to
+    /// accept "95" mid-keystroke. The readout beside a slider has no such problem, and that
+    /// is where a format earns its keep.
+    /// </summary>
+    private static string? FormatString(MemberInfo member)
+    {
+        string? format = member.GetCustomAttribute<DisplayFormatAttribute>()?.DataFormatString;
+
+        return string.IsNullOrWhiteSpace(format) ? null : format;
     }
 
     private static bool IsReadOnly(MemberInfo member)

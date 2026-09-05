@@ -194,6 +194,9 @@ public sealed class Config : IConfig, IDisposable
     internal string RelativeFilePath { get; } = "";
     internal string Domain => _domain;
     internal string ModName => _modName;
+
+    /// <summary>Renames this config for the settings dropdown. See SetConfigDisplayName.</summary>
+    internal void SetModName(string modName) => _modName = modName;
     /// <summary>The shape of the registered settings object, or null for a definition-driven config.</summary>
     internal ConfigSchema? Schema => _schema;
 
@@ -489,7 +492,7 @@ public sealed class Config : IConfig, IDisposable
 
     private readonly ICoreAPI _api;
     private readonly string _domain;
-    private readonly string _modName;
+    private string _modName;
     private readonly Dictionary<string, ConfigSetting> _settings;
     private readonly Dictionary<string, ConfigSetting> _clientSideSettings = new();
     private readonly SortedDictionary<float, IConfigBlock> _configBlocks;
@@ -863,6 +866,7 @@ public sealed class Config : IConfig, IDisposable
         definition.Add("default", GetDefaultValue(node, owner));
 
         if (node.Comment != null) definition.Add("comment", node.Comment);
+        if (node.Format != null) definition.Add("format", node.Format);
         if (node.ClientSide) definition.Add("clientSide", true);
         if (node.Logarithmic) definition.Add("logarithmic", true);
         if (node.Hidden) definition.Add("hide", true);
@@ -905,6 +909,7 @@ public sealed class Config : IConfig, IDisposable
         definition.Add("default", ContainerDefault(node, owner));
 
         if (node.Comment != null) definition.Add("comment", node.Comment);
+        if (node.Format != null) definition.Add("format", node.Format);
         if (node.ClientSide) definition.Add("clientSide", true);
         if (node.Hidden) definition.Add("hide", true);
         if (node.ReadOnly) definition.Add("readonly", true);

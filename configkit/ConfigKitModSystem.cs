@@ -42,7 +42,24 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
             return;
         }
 
-        Config config = new(_api, domain, _api.ModLoader.GetMod(domain)?.Info.Name ?? Lang.Get(domain), configObject, path ?? domain + ".json");
+        // A domain already taken. Dictionary.Add throws, and this method is called from a
+        // mod's StartPre - so the throw escapes into the mod loader and that mod fails to
+        // start, over a settings screen. Worse for a library registering several configs in
+        // a loop: one duplicate and every config after it is never registered at all, which
+        // is how InsanityLib's mods came down when the same static registry ran on both
+        // sides of a singleplayer session. Refuse the way every other refusal here does.
+        if (_configs.ContainsKey(domain))
+        {
+            LoggerUtil.Notify(_api, this, $"Not registering '{domain}': a config is already registered under that domain.");
+            return;
+        }
+
+        // What the dropdown calls this config. A domain that is a mod id resolves to that
+        // mod's name; anything else falls through to Lang, which returns the key unchanged
+        // when nobody translated it. That last case is what SetConfigDisplayName is for.
+        string name = _api.ModLoader.GetMod(domain)?.Info.Name ?? Lang.Get(domain);
+
+        Config config = new(_api, domain, name, configObject, path ?? domain + ".json");
 
         // Say what was registered, and say what was not. The old reflection walk dropped
         // every member it could not classify with no row, no key and no log line, so a mod
@@ -96,6 +113,22 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         }
 
         _customManagedConfigs.Add(domain);
+    }
+
+    /// <summary>
+    /// Names a registered config for the settings dropdown, overriding the mod name a domain
+    /// would otherwise resolve to. Safe to call at any point after registration; the dropdown
+    /// reads it when the window is composed.
+    ///
+    /// Deliberately not a parameter on <see cref="RegisterManagedConfig"/>. Adding one - even
+    /// with a default - changes that method's signature, and a caller compiled against the
+    /// previous release binds to the signature it saw at compile time. The result is a
+    /// MissingMethodException at registration rather than a compile error, which for a mod
+    /// registering several configs takes out every config after the first.
+    /// </summary>
+    public void SetConfigDisplayName(string domain, string displayName)
+    {
+        if (_configs.TryGetValue(domain, out Config? config)) config.SetModName(displayName);
     }
 
     /// <summary>

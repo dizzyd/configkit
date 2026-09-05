@@ -152,6 +152,7 @@ All stock .NET. `System.ComponentModel`, `System.ComponentModel.DataAnnotations`
 | `[Display(Order = n)]` | Where the row sits; lower is earlier |
 | `[Key]` | On a field of a list element: which field labels its row |
 | `[DataType("blockcode")]` | Keys are block codes — see below |
+| `[DisplayFormat(DataFormatString = "P")]` | How the number reads — see *Formats* below |
 | `[JsonProperty("…")]` | The key to write in the file |
 | `[Browsable(false)]` | Hidden from the screen, **still saved** |
 | `[JsonIgnore]` | **Not saved** and not shown |
@@ -209,6 +210,49 @@ past that a pixel is thousands of units and no particular value can be chosen an
 Write the bound you mean. An honest `[Range(0, 10)]` gets the slider; reaching for
 `int.MaxValue` to mean "any positive number" gets the text box, which is the better control
 for it.
+
+### Your doc comments are the tooltips
+
+A member with no `[Description]` falls back to its own `///` summary:
+
+```csharp
+/// <summary>The lowest durability objects should ever drop to.</summary>
+[Range(0, 1)]
+public float MinDurability = 0;
+```
+
+That text becomes the hover tooltip, with the source indentation collapsed and any
+`<see cref="..."/>` reduced to the name it points at. `[Description]` still wins where a
+member has both — it was written to be shown, and the doc comment was written for a reader
+of the source.
+
+It costs one line in your csproj, plus shipping the `.xml` the compiler emits alongside
+your `.dll` in the zip:
+
+```xml
+<GenerateDocumentationFile>true</GenerateDocumentationFile>
+```
+
+Without that file nothing happens and nothing breaks — the member simply has no tooltip.
+
+### Formats
+
+`[DisplayFormat(DataFormatString = "P")]` changes how a number **reads**, never what is
+stored:
+
+```csharp
+[Range(0, 1)]
+[DisplayFormat(DataFormatString = "P")]
+public float DurabilityLeeway = 0.95f;      // reads 95.00 %, stores 0.95
+```
+
+Any .NET numeric format works — `P`, `N2`, `0.##`. It applies to the readout beside a slider
+and to the tooltip that follows the handle, and deliberately **not** to a box you type into:
+formatting an editable field means parsing the format back out, and a half-typed value has
+to parse too. `ApplyFormatInEditMode` is ignored for that reason.
+
+A format string that does not work out costs the formatting and nothing else — the raw
+number is shown instead.
 
 ### `[DataType]`, and why it earns its place
 

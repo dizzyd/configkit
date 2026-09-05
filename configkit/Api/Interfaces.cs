@@ -57,6 +57,17 @@ public interface IConfigProvider
     void RegisterManagedConfig(string domain, object configObject, string path = null,
         Action onSyncedFromServer = null, Action<string> onSettingChanged = null, Action onConfigSaved = null);
     /// <summary>
+    /// What the settings dropdown calls a registered config. By default that is the name of
+    /// the mod whose id is the domain, which is right for the usual one-config mod and wrong
+    /// for a mod registering several - those need a domain each, and none of them is a mod id,
+    /// so the dropdown falls back to showing the raw domain.
+    ///
+    /// A separate call rather than another parameter on RegisterManagedConfig: adding even an
+    /// optional parameter changes the method's signature, and a mod already compiled against
+    /// the old one calls a method that no longer exists.
+    /// </summary>
+    void SetConfigDisplayName(string domain, string displayName);
+    /// <summary>
     /// Fired when a setting in a config changed. Action arguments: domain, config, setting.
     /// </summary>
     event Action<string, IConfig, ISetting>? SettingChanged;

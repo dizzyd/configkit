@@ -57,6 +57,12 @@ public class ConfigSetting : ISetting
         }
     }
     public string? Comment { get; internal set; }
+
+    /// <summary>
+    /// A .NET format string for writing this setting's number out - "P", "N2" and friends,
+    /// from [DisplayFormat]. Display only; the stored value is never formatted.
+    /// </summary>
+    public string? Format { get; internal set; }
     /// <summary>
     /// The member this setting was reflected from, for a managed config. Null for one built
     /// from a definition file, which has no class behind it.
@@ -117,6 +123,7 @@ public class ConfigSetting : ISetting
         YamlCode = previous.YamlCode;
         MappingKey = previous.MappingKey;
         Comment = previous.Comment;
+        Format = previous.Format;
         Validation = previous.Validation;
         SortingWeight = previous.SortingWeight;
         InGui = previous.InGui;
@@ -533,6 +540,7 @@ public class ConfigSetting : ISetting
         {
             Value = json["default"],
             Comment = json["comment"].AsString(),
+            Format = json["format"].AsString(),
             InGui = json["ingui"].AsString(json["nameInGui"].AsString(json["name"].AsString(code))),
             ClientSide = json["clientSide"].AsBool(false),
             SortingWeight = json["weight"].AsFloat(0),
