@@ -54,8 +54,15 @@ internal sealed class SchemaNode
     /// <summary>Explicit label from [DisplayName] or [Display(Name)]. Null means "derive one".</summary>
     public string? Label;
     public string? Comment;
-    /// <summary>Accordion section this member belongs to, from [Category] or the parent object.</summary>
-    public string? Section;
+    /// <summary>
+    /// Which section this member belongs to, as an identity rather than a caption:
+    /// "cat:Doors" for a name the author chose, or the owning object's path for one derived
+    /// from a class. The two namespaces cannot collide, which a shared display name could -
+    /// a [Category("Rain collector")] and a nested RainCollector used to become one section.
+    /// </summary>
+    public string? SectionId;
+    /// <summary>What that section is called on screen. Never compared, only drawn.</summary>
+    public string? SectionLabel;
     /// <summary>True when [Category] or [Display(GroupName)] named the section outright.</summary>
     public bool SectionExplicit;
     /// <summary>Domain hint for a key or string, from [DataType]. Unused until autocomplete lands.</summary>
@@ -188,7 +195,7 @@ internal static class SchemaBuilder
 
         foreach (MemberInfo member in Members(type))
         {
-            SchemaNode? node = Build(member, prefix: "", section: null, visiting, depth: 1, notices, position);
+            SchemaNode? node = Build(member, prefix: "", sectionId: null, sectionLabel: null, visiting, depth: 1, notices, position);
             if (node != null) nodes.Add(node);
         }
 
@@ -237,7 +244,7 @@ internal static class SchemaBuilder
         }
     }
 
-    private static SchemaNode? Build(MemberInfo member, string prefix, string? section, Stack<Type> visiting, int depth, List<string> notices, int[] position)
+    private static SchemaNode? Build(MemberInfo member, string prefix, string? sectionId, string? sectionLabel, Stack<Type> visiting, int depth, List<string> notices, int[] position)
     {
         Type memberType = (member as PropertyInfo)?.PropertyType ?? ((FieldInfo)member).FieldType;
 
@@ -279,7 +286,7 @@ internal static class SchemaBuilder
             node.LegacyPaths.Add(prefix.Length == 0 ? member.Name : $"{prefix}/{member.Name}");
         }
 
-        ApplyCategory(member, node, inherited: section);
+        ApplyCategory(member, node, inheritedId: sectionId, inheritedLabel: sectionLabel);
 
         Classify(node, visiting, depth, notices, position);
 
@@ -301,9 +308,10 @@ internal static class SchemaBuilder
     /// flags strips spaces and case. Matching on the normalised form and then *displaying*
     /// it gives you a heading that reads "doors".
     /// </summary>
-    private static void ApplyCategory(MemberInfo member, SchemaNode node, string? inherited)
+    private static void ApplyCategory(MemberInfo member, SchemaNode node, string? inheritedId, string? inheritedLabel)
     {
-        node.Section = inherited;
+        node.SectionId = inheritedId;
+        node.SectionLabel = inheritedLabel;
 
         string? category = member.GetCustomAttribute<CategoryAttribute>()?.Category;
 
@@ -312,7 +320,8 @@ internal static class SchemaBuilder
         string? groupName = display?.GetGroupName();
         if (!string.IsNullOrWhiteSpace(groupName))
         {
-            node.Section = groupName;
+            node.SectionId = CategoryId(groupName!);
+            node.SectionLabel = groupName;
             node.SectionExplicit = true;
         }
 
@@ -339,7 +348,9 @@ internal static class SchemaBuilder
 
         if (rest.Count > 0)
         {
-            node.Section = string.Join(", ", rest);
+            string named = string.Join(", ", rest);
+            node.SectionId = CategoryId(named);
+            node.SectionLabel = named;
             node.SectionExplicit = true;
         }
     }
@@ -506,7 +517,7 @@ internal static class SchemaBuilder
         {
             foreach (MemberInfo member in Members(type))
             {
-                SchemaNode? child = Build(member, node.Path, ChildSection(node), visiting, depth + 1, notices, position);
+                SchemaNode? child = Build(member, node.Path, ChildSectionId(node), ChildSectionLabel(node), visiting, depth + 1, notices, position);
                 if (child == null) continue;
 
                 child.Parent = node;
@@ -531,16 +542,26 @@ internal static class SchemaBuilder
     /// named for the member and prefixed by whatever group it is itself sitting in, so a
     /// leaf three classes down still says where it came from.
     /// </summary>
-    internal static string ChildSection(SchemaNode node)
+    internal static string ChildSectionId(SchemaNode node)
+        => node.SectionExplicit && node.SectionId != null ? node.SectionId : node.Path;
+
+    internal static string ChildSectionLabel(SchemaNode node)
     {
-        if (node.SectionExplicit && node.Section != null) return node.Section;
+        if (node.SectionExplicit && node.SectionLabel != null) return node.SectionLabel;
 
         // An author's [Category] is used as written; a name derived from a member is tidied
         // up the same way a label is, so a heading reads "Rain collector" and not
         // "RainCollector".
         string own = node.Label ?? Humanize(node.Code);
-        return node.Section == null ? own : $"{node.Section} > {own}";
+        return node.SectionLabel == null ? own : $"{node.SectionLabel} > {own}";
     }
+
+    /// <summary>
+    /// A section an author named. The name is the identity - two classes both saying
+    /// [Category("Doors")] are meant to be one section - so it is the id, kept in its own
+    /// namespace so it cannot collide with one derived from a member path.
+    /// </summary>
+    private static string CategoryId(string name) => "cat:" + name;
 
     // ------------------------------------------------------------------ attributes
 

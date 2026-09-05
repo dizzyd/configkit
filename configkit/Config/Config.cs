@@ -718,7 +718,7 @@ public sealed class Config : IConfig, IDisposable
         List<(SchemaNode node, object? owner)> flat = [];
         Flatten(schema.Nodes, root, flat);
 
-        foreach ((SchemaNode node, object? owner) in InOrder(flat.Where(entry => entry.node.Section == null)))
+        foreach ((SchemaNode node, object? owner) in InOrder(flat.Where(entry => entry.node.SectionId == null)))
         {
             settings.Add(DefinitionFor(node, owner, domain));
         }
@@ -727,17 +727,18 @@ public sealed class Config : IConfig, IDisposable
         // instead meant [Display(Order)] could move a row within its section but never move
         // the section, so a member ordered to the front stayed behind whatever was declared
         // above it.
-        IEnumerable<string> sections = flat
-            .Where(entry => entry.node.Section != null)
-            .GroupBy(entry => entry.node.Section!)
-            .OrderBy(group => group.Min(entry => entry.node.Weight))
-            .Select(group => group.Key);
+        // Grouped by identity, drawn by label. A section named by an author and one derived
+        // from a class can read the same and still be two sections.
+        IEnumerable<IGrouping<string, (SchemaNode node, object? owner)>> sections = flat
+            .Where(entry => entry.node.SectionId != null)
+            .GroupBy(entry => entry.node.SectionId!)
+            .OrderBy(group => group.Min(entry => entry.node.Weight));
 
-        foreach (string section in sections)
+        foreach (IGrouping<string, (SchemaNode node, object? owner)> section in sections)
         {
-            AddSeparator(settings, section);
+            AddSeparator(settings, section.Key, section.First().node.SectionLabel);
 
-            foreach ((SchemaNode node, object? owner) in InOrder(flat.Where(entry => entry.node.Section == section)))
+            foreach ((SchemaNode node, object? owner) in InOrder(section))
             {
                 settings.Add(DefinitionFor(node, owner, domain));
             }
@@ -798,14 +799,13 @@ public sealed class Config : IConfig, IDisposable
         };
     }
 
-    private static void AddSeparator(JArray settings, string? title)
+    private static void AddSeparator(JArray settings, string code, string? title)
     {
-        if (title == null) return;
-
         settings.Add(new JObject
         {
             { "type", "separator" },
-            { "title", title },
+            { "code", code },
+            { "title", title ?? code },
             { "collapsible", true }
         });
     }

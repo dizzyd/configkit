@@ -167,6 +167,13 @@ Labels come from the field name, tidied up: `LitresPerHour` reads "Litres per ho
 translation to override it properly — the key is the setting's path with the prefix, so
 `<yourmod>:setting-RainCollector-LitresPerHour` — or `[Display(Name = "…")]` for a quick fix.
 
+**Section headings translate the same way.** A heading's key is
+`<yourmod>:section-<its identity>`: `section-Doors` for `[Category("Doors")]`, and
+`section-RainCollector-Overflow` for a class nested inside a class. Headings are compared by
+that identity and only *drawn* by their caption, so translating one does not change what the
+screen remembers is open — and a `[Category("Doors")]` sitting beside a nested class also
+called `Doors` stays two sections rather than merging into one.
+
 **`[DisplayName]` does not work on a field.** Its `AttributeUsage` allows class, method,
 property, indexer and event, and a config class is nearly always public fields, so reach for
 `[Display(Name = "…")]` instead — it allows fields and does the same job. `[DisplayName]` is

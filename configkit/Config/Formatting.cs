@@ -24,6 +24,13 @@ internal interface IFormattingBlock : IConfigBlock
     public bool StopCollapsible { get; }
     string Yaml { get; }
 
+    /// <summary>
+    /// Stable identity for this block, or null. A heading is compared by this and drawn by
+    /// its title, so two sections that happen to read the same do not merge, and a title can
+    /// be translated without changing what the screen remembers is open.
+    /// </summary>
+    string Code { get; }
+
     /// <summary>Heading for this block, or null for a plain rule.</summary>
     string Title { get; }
     /// <summary>Explanatory paragraph shown under the heading, or null.</summary>
@@ -41,6 +48,7 @@ internal sealed class Blank : IFormattingBlock
     public bool StopCollapsible => false;
     public string Yaml => "";
 
+    public string Code => null;
     public string Title => null;
     public string Text => null;
     public string Link => null;
@@ -51,6 +59,7 @@ internal sealed class Separator : IFormattingBlock
 {
     public Separator(JsonObject definition, string domain, ICoreAPI api)
     {
+        _code = definition["code"].AsString(null);
         _weight = definition["weight"].AsFloat(0);
         _collapsible = definition["collapsible"].AsBool(false);
         _stopCollapsible = _collapsible;
@@ -61,7 +70,7 @@ internal sealed class Separator : IFormattingBlock
         if (definition.KeyExists("title"))
         {
             _stopCollapsible = true;
-            string title = Localize(definition["title"].AsString(), domain);
+            string title = LocalizeSection(definition["title"].AsString(), _code, domain);
             _title = title;
             int width = title.Length + 6;
             string line = new('#', width);
@@ -89,6 +98,7 @@ internal sealed class Separator : IFormattingBlock
     }
 
     public string Yaml => _yaml;
+    public string Code => _code;
     public float SortingWeight => _weight;
     public bool Collapsible => _collapsible;
     public bool StopCollapsible => _stopCollapsible;
@@ -100,6 +110,7 @@ internal sealed class Separator : IFormattingBlock
 
 
     private readonly string _yaml;
+    private readonly string? _code;
     private readonly float _weight;
     private readonly bool _collapsible;
     private readonly bool _stopCollapsible;
@@ -107,6 +118,23 @@ internal sealed class Separator : IFormattingBlock
     private readonly string? _text;
     private readonly string? _link;
     private readonly string? _linkText;
+
+    /// <summary>
+    /// A heading's translation is looked up by its code, the way every row's is looked up by
+    /// its own. Keyed by the caption instead, a nested section's key came out as
+    /// "mymod:Rain collector > Overflow", which is not a key anybody would write - so
+    /// headings were the one thing on the screen that could not really be translated.
+    /// </summary>
+    private static string LocalizeSection(string title, string? code, string domain)
+    {
+        if (code != null)
+        {
+            string key = $"{domain}:section-{code.Replace("cat:", "").Replace('/', '-')}";
+            if (Lang.HasTranslation(key)) return Lang.Get(key);
+        }
+
+        return Localize(title, domain);
+    }
 
     private static string Localize(string value, string domain)
     {

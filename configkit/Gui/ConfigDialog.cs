@@ -66,8 +66,9 @@ public class ConfigDialog : GuiDialog
     private ElementBounds? _contentBounds;
     private double _contentHeight;
 
-    /// The section currently unfolded. One at a time: a config with a dozen sub-objects is a
-    /// dozen headings and one body, rather than a screen the player has to hunt through.
+    /// The section currently unfolded, by identity rather than by caption. One at a time: a
+    /// config with a dozen sub-objects is a dozen headings and one body, rather than a screen
+    /// the player has to hunt through.
     private string? _openSection;
 
     /// Set when the whole config fits without scrolling, in which case folding it would be
@@ -94,8 +95,8 @@ public class ConfigDialog : GuiDialog
     /// Widgets whose value can only be pushed in once the composer has built them.
     private readonly List<Action> _afterCompose = new();
 
-    /// The formatting block behind each heading, so its explanatory line is not lost when the
-    /// block is turned into a fold toggle.
+    /// The formatting block behind each heading, keyed by its identity, so its caption and
+    /// its explanatory line are both recoverable when the block becomes a fold toggle.
     private readonly Dictionary<string, IFormattingBlock> _headingBlocks = new();
 
     /// Every line of prose currently drawn: separator text, and notes about members that
@@ -179,6 +180,14 @@ public class ConfigDialog : GuiDialog
                 .Select(block => block.Title)
                 .ToList();
 
+    /// <summary>The identity behind a heading's caption, or the caption itself if it has none.</summary>
+    private string SectionKey(string title)
+        => _configs[_domain].ConfigBlocks.Values
+            .OfType<IFormattingBlock>()
+            .Where(block => block.Title == title)
+            .Select(block => block.Code ?? block.Title)
+            .FirstOrDefault() ?? title;
+
     /// <summary>
     /// Every line of prose on screen: a section's explanatory text, and the note beside a
     /// member ConfigKit cannot store.
@@ -189,8 +198,11 @@ public class ConfigDialog : GuiDialog
     public IReadOnlyList<string> RenderedLabels
         => _settingsByKey.Values.Select(LabelFor).ToList();
 
-    /// <summary>The unfolded section, or null when none is - or when they are all shown.</summary>
-    public string? OpenSection => _allOpen ? null : _openSection;
+    /// <summary>The unfolded section's caption, or null when none is - or when all are shown.</summary>
+    public string? OpenSection
+        => _allOpen || _openSection == null
+            ? null
+            : _headingBlocks.TryGetValue(_openSection, out IFormattingBlock? block) ? block.Title : _openSection;
 
     /// <summary>True when the whole config fitted, so nothing is folded away.</summary>
     public bool EverythingShown => _allOpen;
@@ -348,8 +360,8 @@ public class ConfigDialog : GuiDialog
         Recompose();
     }
 
-    /// <summary>Folds or unfolds a section, as clicking its heading does.</summary>
-    public bool ToggleSectionNamed(string title) => ToggleSection(title);
+    /// <summary>Folds or unfolds a section by its caption, as clicking its heading does.</summary>
+    public bool ToggleSectionNamed(string title) => ToggleSection(SectionKey(title));
 
     public override void OnGuiOpened()
     {
@@ -532,8 +544,10 @@ public class ConfigDialog : GuiDialog
         {
             if (block is IFormattingBlock heading && heading.Title != null)
             {
-                walking = heading.Title;
-                _headingBlocks[heading.Title] = heading;
+                // A definition file's separator may carry no code; then its caption is all
+                // the identity there is, which is what it has always been.
+                walking = heading.Code ?? heading.Title;
+                _headingBlocks[walking] = heading;
                 continue;
             }
 
@@ -658,8 +672,10 @@ public class ConfigDialog : GuiDialog
     }
 
     /// <summary>A foldable heading. Opening one closes whichever was open before it.</summary>
-    private double AddSectionHeader(GuiElementContainer? container, string title, bool open, double y)
+    private double AddSectionHeader(GuiElementContainer? container, string key, bool open, double y)
     {
+        string title = _headingBlocks.TryGetValue(key, out IFormattingBlock? block) ? block.Title : key;
+
         if (container != null)
         {
             // ASCII, not a geometric arrow. The game's font carries no U+25B6 on every
@@ -674,7 +690,7 @@ public class ConfigDialog : GuiDialog
             GuiElementTextButton toggle = new(capi, label,
                 CairoFont.WhiteSmallText().WithWeight(Cairo.FontWeight.Bold),
                 CairoFont.WhiteSmallText().WithWeight(Cairo.FontWeight.Bold).WithColor(GuiStyle.ActiveButtonTextColor),
-                () => ToggleSection(title),
+                () => ToggleSection(key),
                 ElementBounds.Fixed(0, y + 2, DialogWidth - 40, 32), EnumButtonStyle.Small);
 
             toggle.SetOrientation(EnumTextOrientation.Left);
@@ -686,24 +702,24 @@ public class ConfigDialog : GuiDialog
         // A separator carries an explanatory line as well as a title, and turning the block
         // into a fold toggle threw that line away - a definition that explained its group
         // lost the explanation with nothing to show it had ever been there.
-        if (!open || !_headingBlocks.TryGetValue(title, out IFormattingBlock? heading) || heading.Text == null)
+        if (!open || block?.Text == null)
         {
             return y;
         }
 
         if (container != null)
         {
-            container.Add(new GuiElementDynamicText(capi, heading.Text,
+            container.Add(new GuiElementDynamicText(capi, block.Text,
                 CairoFont.WhiteDetailText(), ElementBounds.Fixed(0, y, DialogWidth - 40, 24)));
-            _notes.Add(heading.Text);
+            _notes.Add(block.Text);
         }
 
         return y + 28;
     }
 
-    private bool ToggleSection(string title)
+    private bool ToggleSection(string key)
     {
-        _openSection = _openSection == title ? null : title;
+        _openSection = _openSection == key ? null : key;
         Recompose();
         return true;
     }

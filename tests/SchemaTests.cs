@@ -70,6 +70,18 @@ public class SchemaTests
         public List<string> Fillable { get; } = new();
     }
 
+    /// <summary>
+    /// A nested class and an author's [Category] that read the same. They used to merge into
+    /// one section, because the caption was the identity.
+    /// </summary>
+    public class Colliding2
+    {
+        public Doors Doors = new();
+
+        [Category("Doors")]
+        public int Delay = 10;
+    }
+
     public class Doors { public bool Enabled = true; }
     public class Chutes { public bool Enabled = true; }
 
@@ -462,6 +474,57 @@ public class SchemaTests
         Config config = Fresh(new OrderedMembers(), "schema-order2", "configkit-schema-order2.json");
 
         Assert.Equal("Second,Third,First", string.Join(",", SeparatorTitles(config)));
+    }
+
+    /// <summary>
+    /// A heading is compared by identity and drawn by caption, so two that read the same are
+    /// still two. A [Category("Doors")] and a nested class called Doors used to become one.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task TwoSectionsThatReadTheSameDoNotMerge()
+    {
+        await OnServer();
+
+        Config config = Fresh(new Colliding2(), "schema-merge", "configkit-schema-merge.json");
+
+        JsonObject[] separators = config.Definition["settings"].AsArray()
+            .Where(block => block["type"].AsString() == "separator")
+            .ToArray();
+
+        Assert.Equal(2, separators.Length);
+        Assert.Equal(2, separators.Select(block => block["code"].AsString("")).Distinct().Count());
+
+        // Both are called Doors, and both say so.
+        Assert.True(separators.All(block => block["title"].AsString() == "Doors"),
+            string.Join(" | ", separators.Select(b => b["title"].AsString(""))));
+
+        // One identity comes from the member path, the other from the name the author chose.
+        Assert.True(separators.Any(block => block["code"].AsString("") == "Doors"));
+        Assert.True(separators.Any(block => block["code"].AsString("") == "cat:Doors"));
+    }
+
+    /// <summary>
+    /// A heading's translation key is its identity, matching the setting-&lt;code&gt; convention
+    /// every row already uses. Keyed by caption, a nested section's key came out as
+    /// "domain:Rain collector > Overflow" - not a key anybody would write.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task ASectionCarriesAnIdentityItCanBeTranslatedBy()
+    {
+        await OnServer();
+
+        Config config = Fresh(new NestedSettings(), "schema-langsec", "configkit-schema-langsec.json");
+
+        string[] codes = config.Definition["settings"].AsArray()
+            .Where(block => block["type"].AsString() == "separator")
+            .Select(block => block["code"].AsString(""))
+            .ToArray();
+
+        // The nested class is identified by its path, so its lang key is
+        // schema-langsec:section-RainCollector - stable, and free of spaces and separators.
+        Assert.True(codes.Contains("RainCollector"),
+            $"expected a path for the identity; got {string.Join(", ", codes)}");
+        Assert.True(codes.Contains("cat:Doors"));
     }
 
     private static List<string> SeparatorTitles(Config config)
