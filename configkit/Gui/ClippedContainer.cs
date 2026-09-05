@@ -1,3 +1,4 @@
+using System;
 // ConfigKit - mod configuration for Vintage Story
 // Copyright (C) 2026 Dave (Dizzy) Smith
 //
@@ -142,4 +143,40 @@ public class ClippedContainer : GuiElementContainer
 
     public override void OnMouseMove(ICoreClientAPI api, MouseEvent args)
         => OnlyVisible(() => base.OnMouseMove(api, args));
+
+    /// <summary>
+    /// Key events reach whichever child has focus.
+    ///
+    /// GuiElementContainer forwards keys only when the *container itself* has focus:
+    ///
+    ///     public override void OnKeyPress(ICoreClientAPI api, KeyEvent args)
+    ///     {
+    ///         if (!HasFocus) return;
+    ///
+    /// but clicking a row focuses the child - OnMouseDown calls element.OnFocusGained() and
+    /// nothing ever focuses the container. So a text field could be clicked, take focus and
+    /// show a caret, and then swallow every keystroke in silence.
+    ///
+    /// Reported against MoreHudBars' "Hud bar style", and not specific to it: it was every
+    /// text field in the library, and every number input, since they all live in this
+    /// container. It survived this long because the tests set values through the model - the
+    /// widget's handler was always fine, and nothing ever asked whether a keystroke could
+    /// reach it.
+    /// </summary>
+    public override void OnKeyPress(ICoreClientAPI api, KeyEvent args)
+        => ToFocusedChild(args, element => element.OnKeyPress(api, args));
+
+    public override void OnKeyDown(ICoreClientAPI api, KeyEvent args)
+        => ToFocusedChild(args, element => element.OnKeyDown(api, args));
+
+    private void ToFocusedChild(KeyEvent args, Action<GuiElement> send)
+    {
+        foreach (GuiElement element in Elements)
+        {
+            if (!element.HasFocus) continue;
+
+            send(element);
+            if (args.Handled) return;
+        }
+    }
 }

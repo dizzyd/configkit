@@ -115,6 +115,17 @@ public class ConfigDialog : GuiDialog
 
     public override string ToggleKeyCombinationCode => "configkitconfigs";
 
+    /// <summary>
+    /// While this window is open, the keyboard belongs to it.
+    ///
+    /// Without this the game still reads movement keys underneath: typing a block code into
+    /// a setting walked the player forwards, and W or S with nothing focused walked them
+    /// around behind the window. Escape is exempt by the engine, so the window can always be
+    /// closed - and the toggle hotkey now types its own letter into a focused field rather
+    /// than closing, which is the right trade for a screen full of text boxes.
+    /// </summary>
+    public override bool CaptureAllInputs() => true;
+
     /// <summary>The configs this window is showing, keyed by mod domain.</summary>
     public IReadOnlyDictionary<string, Config> Configs => _configs;
 
@@ -210,6 +221,18 @@ public class ConfigDialog : GuiDialog
     /// </summary>
     public string NumberTextFor(string yamlCode)
         => WidgetFor(yamlCode) is GuiElementEditableTextBase text ? text.GetText() : "";
+
+    /// <summary>
+    /// Where a setting's control sits on screen, for a test that wants to click it rather
+    /// than call its handler. Null when the setting is not currently drawn.
+    /// </summary>
+    public (double X, double Y, double Width, double Height)? ScreenRectFor(string yamlCode)
+    {
+        if (WidgetFor(yamlCode) is not GuiElement widget) return null;
+
+        ElementBounds bounds = widget.Bounds;
+        return (bounds.absX, bounds.absY, bounds.OuterWidth, bounds.OuterHeight);
+    }
 
     /// <summary>
     /// Types into a setting's text control the way a player does - through the widget, so the
