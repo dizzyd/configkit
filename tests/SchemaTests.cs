@@ -287,6 +287,45 @@ public class SchemaTests
         Assert.False(written["closesBehind"]!.Value<bool>(), "the value did not survive the rename");
     }
 
+    /// <summary>
+    /// A file holding both names was written by two generations of code: the mod's own
+    /// serialiser put the [JsonProperty] name there, and ConfigKit before it honoured the
+    /// attribute saved every edit under the member name - which was also the only name it
+    /// ever read back. The member name is therefore the value the player last saw in effect,
+    /// and it wins; the write then retires it, so the two can never disagree again.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task AFileHoldingBothNamesKeepsTheOneThatWasInEffect()
+    {
+        await OnServer();
+
+        const string file = "configkit-schema-both-names.json";
+        Delete(file);
+
+        File.WriteAllText(PathOf(file), "{\n  \"closesBehind\": true,\n  \"ClosesBehind\": false,\n  \"Untouched\": 42\n}\n");
+
+        RenamedSettings settings = new();
+        Config config = new(Sapi, "schema-both-names", "schema-both-names", settings, file);
+        config.AssignSettingsValues(settings);
+
+        Assert.False(settings.ClosesBehind, "the stale [JsonProperty] value shadowed the one saved under the member name");
+        Assert.Equal(42, settings.Untouched);
+
+        config.WriteToFile();
+        JObject written = FileJson(config);
+        Assert.False(written["closesBehind"]!.Value<bool>(), "the value did not survive the rename");
+        Assert.False(written.ContainsKey("ClosesBehind"),
+            "the old name was left in the file, where it would shadow every later edit");
+
+        // And an edit made from here on is what the next load sees.
+        config.GetSetting("closesBehind")!.Value = new JsonObject(new JValue(true));
+        config.WriteToFile();
+
+        RenamedSettings reloaded = new();
+        new Config(Sapi, "schema-both-names", "schema-both-names", reloaded, file).AssignSettingsValues(reloaded);
+        Assert.True(reloaded.ClosesBehind, "an edit under the new name was shadowed on reload");
+    }
+
     // ---------------------------------------------------------------- nesting
 
     [VsTest(TimeoutMs = 60000)]

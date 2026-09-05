@@ -222,6 +222,45 @@ public class DefinitionScreenTests
     }
 
     /// <summary>
+    /// A separator is a divider the author placed, and it does not need a setting after it
+    /// to be worth drawing: a trailing one is where a definition mod puts its closing note,
+    /// and two in a row is a heading with a sub-heading. Drawing a heading only when the
+    /// first setting beneath it is drawn lost both, text included.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task ASeparatorWithNothingUnderItIsStillDrawn()
+    {
+        await OnClient();
+
+        const string definition = @"{
+            ""version"": 1,
+            ""settings"": [
+                { ""type"": ""separator"", ""title"": ""Behaviour"", ""text"": ""What the switch does."" },
+                { ""type"": ""separator"", ""title"": ""Really"", ""text"": ""A heading straight after a heading."" },
+                { ""type"": ""boolean"", ""code"": ""enabled"", ""nameInGui"": ""Enabled"", ""default"": true },
+                { ""type"": ""separator"", ""title"": ""Help"", ""text"": ""Restart after changing."" }
+            ]
+        }";
+
+        Config config = new(Capi, "def-trailing", "def-trailing", new JsonObject(JToken.Parse(definition)));
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { ["def-trailing"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(8);
+
+        Assert.Equal(1, dialog.RenderedSettings.Count);
+        Assert.Equal("What the switch does. | A heading straight after a heading. | Restart after changing.",
+            string.Join(" | ", dialog.RenderedNotes));
+
+        // A filter keeps the divider whose row matched and drops the ones with nothing under them.
+        dialog.SetFilter("Enabled");
+        await Frames.Wait(6);
+        Assert.Equal("A heading straight after a heading.", string.Join(" | ", dialog.RenderedNotes));
+
+        dialog.TryClose();
+    }
+
+    /// <summary>
     /// Whatever the grouping does, the values are the same and so is the file. A definition
     /// mod's config is the thing that must not move.
     /// </summary>

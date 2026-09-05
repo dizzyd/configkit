@@ -628,22 +628,26 @@ public sealed class Config : IConfig, IDisposable
         => setting.Validation?.Mapping == null ? value : new(new JValue(setting.MappingKey));
 
     /// <summary>
-    /// Reads a setting out of a stored document, falling back to any code it used to be
-    /// written under. Aliases are read and never written, so a rename picks the old value up
-    /// once and writes it back under the new name on the next save.
+    /// Reads a setting out of a stored document, trying any code it used to be written under
+    /// before the current one. Aliases are read and never written, so a rename picks the old
+    /// value up once and writes it back under the new name on the next save.
+    ///
+    /// The old name wins when both are present. A file holding both was written by two
+    /// generations of code - the mod's own serialiser put the [JsonProperty] name there, and
+    /// ConfigKit before it honoured that attribute saved every edit under the member name -
+    /// and only the member name was ever read back, so it is the value the player last saw
+    /// in effect. Preferring the new name silently reverted them to whatever the old key had
+    /// held first. Writing then drops the old name, so the two never disagree again.
     /// </summary>
     private static JsonObject? ReadStoredValue(JsonObject stored, ConfigSetting setting)
     {
-        JsonObject? value = new JsonObjectPath(setting.YamlCode).Get(stored).FirstOrDefault((JsonObject?)null);
-        if (value != null) return value;
-
         foreach (string legacy in setting.LegacyCodes)
         {
-            value = new JsonObjectPath(legacy).Get(stored).FirstOrDefault((JsonObject?)null);
-            if (value != null) return value;
+            JsonObject? stale = new JsonObjectPath(legacy).Get(stored).FirstOrDefault((JsonObject?)null);
+            if (stale != null) return stale;
         }
 
-        return null;
+        return new JsonObjectPath(setting.YamlCode).Get(stored).FirstOrDefault((JsonObject?)null);
     }
 
     /// <summary>
@@ -1378,6 +1382,13 @@ public sealed class Config : IConfig, IDisposable
             if (count == 0 && !setting.YamlCode.Contains('/'))
             {
                 (config.Token as JObject)?.Add(setting.YamlCode, stored.Token);
+            }
+
+            // The old name is read in preference to the new one, so it has to go the moment
+            // the new one is written - or it would shadow every edit made from here on.
+            foreach (string legacy in setting.LegacyCodes)
+            {
+                new JsonObjectPath(legacy).Remove(config);
             }
         }
         return config.Token.ToString(Newtonsoft.Json.Formatting.Indented);

@@ -87,6 +87,27 @@ internal sealed class JsonObjectPath
         return 1;
     }
 
+    /// <summary>
+    /// Drops every property this path selects. Used to retire a setting's old name once the
+    /// new one has been written, so a file that held both does not keep the stale one.
+    /// </summary>
+    public int Remove(JsonObject tree)
+    {
+        List<JsonObject> targets = Get(tree).ToList();
+        int removed = 0;
+
+        foreach (JsonObject element in targets)
+        {
+            if (element.Token?.Parent is JProperty property)
+            {
+                property.Remove();
+                removed++;
+            }
+        }
+
+        return removed;
+    }
+
     private static bool IsPlainKey(string element)
         => !int.TryParse(element, out _)
            && element != "-"

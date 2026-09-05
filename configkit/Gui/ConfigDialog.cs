@@ -540,6 +540,9 @@ public class ConfigDialog : GuiDialog
 
         if (container != null) { _headingBlocks.Clear(); _notes.Clear(); }
 
+        bool filtering = _filter.Length > 0;
+        _foldable = config.Schema != null;
+
         foreach ((float _, IConfigBlock block) in config.ConfigBlocks)
         {
             if (block is IFormattingBlock heading && heading.Title != null)
@@ -548,14 +551,16 @@ public class ConfigDialog : GuiDialog
                 // the identity there is, which is what it has always been.
                 walking = heading.Code ?? heading.Title;
                 _headingBlocks[walking] = heading;
-                continue;
+
+                // A heading derived from a class is a fold toggle, drawn when its first
+                // member is. A definition's separator is a divider the author placed, and
+                // it stays where it was put: lifting it out of the sequence lost a trailing
+                // one, and one followed only by another, together with the text on it.
+                if (_foldable) continue;
             }
 
             blocks.Add((walking, block));
         }
-
-        bool filtering = _filter.Length > 0;
-        _foldable = config.Schema != null;
 
         // Filtering cuts across the folding: a player searching for "delay" wants every
         // match, not the matches that happen to be in the one open section.
@@ -573,7 +578,21 @@ public class ConfigDialog : GuiDialog
             {
                 // A filtered list shows what matches. A note about an uneditable member is
                 // not a match for anything the player typed unless its own text says so.
-                if (!filtering || (formatting.Text?.Contains(_filter, StringComparison.OrdinalIgnoreCase) ?? false))
+                bool textMatches = formatting.Text?.Contains(_filter, StringComparison.OrdinalIgnoreCase) ?? false;
+
+                if (formatting.Title != null)
+                {
+                    // A definition's separator, in place. Under a filter it is shown when
+                    // something beneath it matched, or its own line did.
+                    if (!filtering || textMatches || (section != null && withMatches.Contains(section)))
+                    {
+                        y = AddFormattingBlock(container, formatting, y);
+                        headed = section;
+                    }
+                    continue;
+                }
+
+                if (!filtering || textMatches)
                 {
                     y = AddFormattingBlock(container, formatting, y);
                 }
@@ -1157,12 +1176,19 @@ public class ConfigDialog : GuiDialog
     /// for the usual small range, and absurd for a wide one: a percentage from 0 to 100 became
     /// a ten thousand step slider, which is forty units per pixel and stores 43.27 when the
     /// player meant 43. Coarsen only once the step count stops meaning anything.
+    ///
+    /// A declared step is the author's own answer to that question, and it has to be
+    /// representable: at a scale too coarse for it the step rounds to nothing and the widget
+    /// clamps it to one unit of whatever scale was picked instead, so a 0 to 100 range with
+    /// a step of 0.01 could no longer land on 43.27. The range heuristic is for the case
+    /// where nothing was declared.
     /// </summary>
     private static int ScaleFor(ConfigSetting setting)
     {
         if (setting.SettingType != ConfigSettingType.Float) return 1;
 
         Validation? validation = setting.Validation;
+        if (validation?.Step != null && validation.Step.AsFloat() > 0) return ScaleForStep(validation.Step.AsFloat());
         if (validation?.Minimum == null || validation.Maximum == null) return FloatScale;
 
         float span = validation.Maximum.AsFloat() - validation.Minimum.AsFloat();
@@ -1170,6 +1196,19 @@ public class ConfigDialog : GuiDialog
 
         if (span * FloatScale <= 2000) return FloatScale;
         return span * 10 <= 2000 ? 10 : 1;
+    }
+
+    /// <summary>The coarsest scale at which a step is a whole number of slider units.</summary>
+    private static int ScaleForStep(float step)
+    {
+        foreach (int scale in new[] { 1, 10, FloatScale })
+        {
+            float scaled = step * scale;
+            if (scaled >= 1 && Math.Abs(scaled - Math.Round(scaled)) < 0.001f) return scale;
+        }
+
+        // Finer than hundredths was never carried; the slider stays as fine as it gets.
+        return FloatScale;
     }
 
     /// <summary>The real value behind a slider position, as the readout beside it would write it.</summary>

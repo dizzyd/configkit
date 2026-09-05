@@ -126,6 +126,44 @@ public class ConfigDialogTests
     }
 
     /// <summary>
+    /// A declared step is the author's own answer to how fine a slider should be. Choosing
+    /// the scale from the range alone rounded a 0.01 step on a 0 to 100 range to nothing,
+    /// so a value the file could hold could no longer be picked on screen.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    [SingleplayerOnly]
+    public async Task ASliderHonoursADeclaredStep()
+    {
+        await OnClient();
+
+        const string definition = @"{
+            ""version"": 1,
+            ""settings"": [
+                { ""type"": ""float"", ""code"": ""fine"", ""nameInGui"": ""Fine"",
+                  ""default"": 43.27, ""range"": { ""min"": 0, ""max"": 100, ""step"": 0.01 } },
+                { ""type"": ""float"", ""code"": ""halves"", ""nameInGui"": ""Halves"",
+                  ""default"": 2.5, ""range"": { ""min"": 0, ""max"": 100, ""step"": 0.5 } }
+            ]
+        }";
+
+        Config config = new(Capi, "stepped", "Stepped", new JsonObject(JToken.Parse(definition)));
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { ["stepped"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(8);
+
+        // Hundredths, because the author asked for them - however wide the range.
+        Assert.Equal("43.27", dialog.SliderValueTexts["fine"]);
+        Assert.Equal(10000, dialog.SliderStepsFor("fine"));
+
+        // Halves need only tenths, so the slider is no finer than it has to be.
+        Assert.Equal("2.5", dialog.SliderValueTexts["halves"]);
+        Assert.Equal(1000, dialog.SliderStepsFor("halves"));
+
+        dialog.TryClose();
+    }
+
+    /// <summary>
     /// The swatch is drawn from the hex string, so parsing is what decides whether a player
     /// sees their colour or a struck-through box.
     /// </summary>

@@ -296,8 +296,10 @@ express.
 If your mod already uses `api.LoadModConfig<T>()`, the shape on disk is the same, so your
 players' existing files keep loading. Two things to check:
 
-1. **`[JsonProperty]` names are honoured**, and the field name is kept as a fallback the
-   reader still accepts. A rename never orphans a stored value.
+1. **`[JsonProperty]` names are honoured**, and the field name is still read. A rename
+   never orphans a stored value. If a file holds both keys, the field name wins - it is the
+   one earlier ConfigKit versions read and wrote, so it is the value the player last had in
+   effect - and the next save drops it, leaving only the `[JsonProperty]` name.
 2. **Fields that were previously invisible now appear** in the file and on screen. That is
    the point of the change; `[Browsable(false)]` is the opt-out if you want one hidden.
 
