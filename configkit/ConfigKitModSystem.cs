@@ -42,6 +42,8 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
             return;
         }
 
+        if (Unmanaged(domain)) return;
+
         // A domain already taken. Dictionary.Add throws, and this method is called from a
         // mod's StartPre - so the throw escapes into the mod loader and that mod fails to
         // start, over a settings screen. Worse for a library registering several configs in
@@ -167,6 +169,22 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
 
     private readonly Dictionary<string, Config> _configs = new();
     private readonly HashSet<string> _domains = new();
+
+    /// <summary>Mod ids configkit.json says to leave to someone else. See ConfigKitOwnConfig.</summary>
+    private HashSet<string> _unmanaged = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a domain has been handed to another config manager. Checked at both points a
+    /// config can be claimed - a mod registering one, and an asset declaring one - because a
+    /// clash is about the file, and both routes end at the same file.
+    /// </summary>
+    private bool Unmanaged(string domain)
+    {
+        if (!_unmanaged.Contains(domain)) return false;
+
+        LoggerUtil.Notify(_api, this, $"Not managing '{domain}': {OwnConfig.FileName} lists it as unmanaged.");
+        return true;
+    }
     private readonly Dictionary<string, Config> _configsToRegister = [];
     private readonly HashSet<string> _customManagedConfigs = [];
 
@@ -184,6 +202,10 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     {
         _api = api;
         _standingDown = StandDown(api);
+
+        // Read even while standing down: it costs nothing, and it means the file exists to be
+        // found by someone whose first encounter with ConfigKit is a conflict.
+        _unmanaged = OwnConfig.UnmanagedDomains(api);
     }
 
     /// <summary>
@@ -398,6 +420,9 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         if (_api == null) return;
 
         string domain = asset.Location.Domain;
+
+        if (Unmanaged(domain)) return;
+
         byte[] data = asset.Data;
         data = System.Text.Encoding.Convert(System.Text.Encoding.UTF8, System.Text.Encoding.Unicode, data);
         string json = System.Text.Encoding.Unicode.GetString(data);

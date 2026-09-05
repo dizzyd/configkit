@@ -179,6 +179,37 @@ derived from config: at that moment the values may have changed under you.
 
 ---
 
+## Sharing a mod with another config manager
+
+ConfigKit stands down completely when **configlib** or **autoconfiglib** is installed. Those
+two read the same assets and write the same files it does, so they contend for everything and
+there is nothing to divide.
+
+A manager that contends for only *some* mods is a different problem. Integrated Mod Manager,
+for example, manages exactly the mods carrying a `config/imm.json` and edits their config
+files in place — so it overlaps with ConfigKit only where a mod is described to both. Standing
+down globally there would cost every other mod its settings screen to settle an argument about
+one.
+
+`ModConfig/configkit.json` is the per-mod answer:
+
+```json
+{
+  "UnmanagedDomains": [ "somemod" ]
+}
+```
+
+ConfigKit will not claim a listed mod from either direction — neither a `RegisterManagedConfig`
+call nor a `configlib-patches.json` asset — and says so in the log. Everything else is
+unaffected.
+
+The file is written on first run so it can be found, and it is deliberately **not** a
+ConfigKit-managed config with a screen of its own: a switch that turns settings screens off
+has to stay reachable once they are off. A malformed one is reported and ignored, because its
+whole job is to rescue a broken setup and it must not be able to cause one.
+
+---
+
 ## Reading someone else's config
 
 `ConfigKitModSystem` implements `IConfigProvider`:
@@ -230,6 +261,7 @@ Common answers:
 | symptom | cause |
 |---|---|
 | no settings screen at all | `configlib` or `autoconfiglib` is installed; ConfigKit stood down |
+| one mod has no settings screen | it is listed in `ModConfig/configkit.json` under `UnmanagedDomains` |
 | one field missing, no log line | it is `[JsonIgnore]`, or `[Browsable(false)]` — the latter is still in the file |
 | a field shows as raw JSON | nothing can edit that type; it still round-trips |
 | an edit does not reach your object | it failed a validation attribute — the message is at the bottom of the window, and in `config.Errors` |
