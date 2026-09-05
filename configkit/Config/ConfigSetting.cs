@@ -58,12 +58,22 @@ public class ConfigSetting : ISetting
     }
     public string? Comment { get; internal set; }
     /// <summary>
+    /// The member this setting was reflected from, for a managed config. Null for one built
+    /// from a definition file, which has no class behind it.
+    ///
+    /// The schema used to live in a dictionary beside the settings, keyed by code, and the
+    /// two had to be kept in step by hand - which they were not: it indexed only scalars, so
+    /// every container failed to find its member and silently never reached the object.
+    /// </summary>
+    internal SchemaNode? Node { get; set; }
+
+    /// <summary>
     /// Codes this setting also answers to when reading a file, and never writes. A member
     /// renamed - by [JsonProperty], or by the author - has its old name sitting in every
     /// existing config file, and re-keying without reading the old one back would silently
     /// reset the value to its default with nothing in the log to say so.
     /// </summary>
-    public IReadOnlyList<string> LegacyCodes { get; internal set; } = [];
+    public IReadOnlyList<string> LegacyCodes => Node?.LegacyPaths ?? (IReadOnlyList<string>)[];
     public Validation? Validation { get; internal set; }
     public float SortingWeight { get; internal set; }
     public string? InGui { get; internal set; }
@@ -116,7 +126,7 @@ public class ConfigSetting : ISetting
         Hide = previous.Hide;
         ReadOnly = previous.ReadOnly;
         Link = previous.Link;
-        LegacyCodes = previous.LegacyCodes;
+        Node = previous.Node;
     }
 
     /// <summary>

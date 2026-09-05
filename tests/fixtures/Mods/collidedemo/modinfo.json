@@ -1,0 +1,14 @@
+{
+    "type": "content",
+    "modid": "collidedemo",
+    "name": "Collide demo",
+    "version": "1.0.0",
+    "authors": [
+        "test"
+    ],
+    "dependencies": {
+        "game": "1.22.0"
+    },
+    "side": "universal",
+    "description": "A definition whose separator weights land on weights its settings also use. ConstructYaml added both to one weight-keyed dictionary without a guard, so it threw and the config came back with no settings at all."
+}

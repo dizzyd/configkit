@@ -233,11 +233,8 @@ public class ConfigDialog : GuiDialog
     /// </summary>
     public bool OpenSetting(string yamlCode)
     {
-        Config config = _configs[_domain];
-        SchemaNode? node = config.NodeFor(yamlCode);
-        if (node == null || (node.Kind != SchemaKind.Dictionary && node.Kind != SchemaKind.List)) return false;
-
-        if (config.GetSetting(yamlCode) is not ConfigSetting setting) return false;
+        if (_configs[_domain].GetSetting(yamlCode) is not ConfigSetting setting) return false;
+        if (setting.Node is not { Kind: SchemaKind.Dictionary or SchemaKind.List } node) return false;
 
         // The same crumb the row's own button uses, so driving the screen from code and
         // clicking it produce the same breadcrumb.
@@ -592,8 +589,8 @@ public class ConfigDialog : GuiDialog
             // says the server owns it, the other that nothing owns it.
             bool serverOwned = IsServerControlled(setting);
             bool locked = serverOwned || setting.ReadOnly;
-            SchemaNode? node = config.NodeFor(setting.YamlCode);
-            bool container_ = node != null && (node.Kind == SchemaKind.Dictionary || node.Kind == SchemaKind.List);
+            SchemaNode? node = setting.Node;
+            bool container_ = node is { Kind: SchemaKind.Dictionary or SchemaKind.List };
 
             if (!locked && !container_) _settingsByKey[key] = setting;
             if (container_) _settingsByKey[key] = setting;

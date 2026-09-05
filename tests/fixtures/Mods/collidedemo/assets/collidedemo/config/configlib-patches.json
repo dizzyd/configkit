@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "settings": {
+    "integer": {
+      "N00": {
+        "default": 0,
+        "weight": 0
+      },
+      "N01": {
+        "default": 1,
+        "weight": 1
+      },
+      "N02": {
+        "default": 2,
+        "weight": 2
+      },
+      "N03": {
+        "default": 3,
+        "weight": 3
+      },
+      "N04": {
+        "default": 4,
+        "weight": 4
+      },
+      "N05": {
+        "default": 5,
+        "weight": 5
+      },
+      "N06": {
+        "default": 6,
+        "weight": 6
+      },
+      "N07": {
+        "default": 7,
+        "weight": 7
+      },
+      "N08": {
+        "default": 8,
+        "weight": 8
+      },
+      "N09": {
+        "default": 9,
+        "weight": 9
+      },
+      "N10": {
+        "default": 10,
+        "weight": 10
+      },
+      "N11": {
+        "default": 11,
+        "weight": 11
+      },
+      "N12": {
+        "default": 12,
+        "weight": 12
+      },
+      "N13": {
+        "default": 13,
+        "weight": 13
+      },
+      "N14": {
+        "default": 14,
+        "weight": 14
+      },
+      "N15": {
+        "default": 15,
+        "weight": 15
+      },
+      "N16": {
+        "default": 16,
+        "weight": 16
+      },
+      "N17": {
+        "default": 17,
+        "weight": 17
+      },
+      "N18": {
+        "default": 18,
+        "weight": 18
+      },
+      "N19": {
+        "default": 19,
+        "weight": 19
+      }
+    }
+  },
+  "formatting": [
+    {
+      "type": "separator",
+      "title": "Part 0",
+      "weight": 0
+    },
+    {
+      "type": "separator",
+      "title": "Part 1",
+      "weight": 5
+    },
+    {
+      "type": "separator",
+      "title": "Part 2",
+      "weight": 10
+    },
+    {
+      "type": "separator",
+      "title": "Part 3",
+      "weight": 15
+    }
+  ]
+}

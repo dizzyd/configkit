@@ -198,14 +198,6 @@ public sealed class Config : IConfig, IDisposable
     internal ConfigSchema? Schema => _schema;
 
     /// <summary>
-    /// The schema node behind a setting, or null for a definition-driven config. The settings
-    /// screen needs it to tell a dictionary from a member it simply has no editor for - both
-    /// arrive as a subtree, and only one of them can be opened.
-    /// </summary>
-    internal SchemaNode? NodeFor(string code)
-        => _nodesByPath.TryGetValue(code, out SchemaNode? node) ? node : null;
-
-    /// <summary>
     /// What ConfigKit made of the registered class, in one line: how many settings, sections
     /// and containers it found, and how many members it could not make editable. Empty for a
     /// definition-driven config.
@@ -419,7 +411,7 @@ public sealed class Config : IConfig, IDisposable
 
     private bool AssignBySchema(object target, string code, ConfigSetting setting)
     {
-        if (!_nodesByPath.TryGetValue(code, out SchemaNode? node)) return false;
+        if (setting.Node is not { } node) return false;
 
         object? owner = OwnerFor(node, target);
         return owner != null && setting.AssignTo(owner, node.Member);
@@ -655,23 +647,17 @@ public sealed class Config : IConfig, IDisposable
     }
 
     /// <summary>
-    /// Hands each setting the metadata that lives on its schema node rather than in the
-    /// definition - the aliases it answers to, and the member it assigns back onto.
+    /// Hands each setting the member it came from. Everything the setting needs but the
+    /// definition cannot express - the aliases it answers to, which object it assigns onto,
+    /// whether it is a container the screen can open - hangs off that one reference.
     /// </summary>
     private void BindSchemaToSettings(Dictionary<string, ConfigSetting> settings)
     {
         if (_schema == null) return;
 
-        _nodesByPath = _schema.Walk()
-            .Where(node => node.IsSetting)
-            .ToDictionary(node => node.Path, node => node);
-
-        foreach ((string code, ConfigSetting setting) in settings)
+        foreach (SchemaNode node in _schema.Walk().Where(node => node.IsSetting))
         {
-            if (_nodesByPath.TryGetValue(code, out SchemaNode? node) && node.LegacyPaths.Count > 0)
-            {
-                setting.LegacyCodes = node.LegacyPaths;
-            }
+            if (settings.TryGetValue(node.Path, out ConfigSetting? setting)) setting.Node = node;
         }
     }
 
