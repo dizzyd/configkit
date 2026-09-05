@@ -237,7 +237,8 @@ and none of them becomes one:
 ```
 
 They say "no upper limit", not "a slider two billion units wide", so the setting keeps the
-plain number input and the range still validates. A bound is treated as open when it is
+plain number input. The bound that *is* real still binds — the first of those refuses a
+negative, as *Validation* above describes. A bound is treated as open when it is
 infinite, or when the span is wider than a million steps at the scale the slider would use —
 past that a pixel is thousands of units and no particular value can be chosen anyway.
 

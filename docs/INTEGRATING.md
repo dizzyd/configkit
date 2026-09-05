@@ -202,6 +202,10 @@ mod's settings.
 `AssignSettingsValues(object)`. `ISetting` carries `Value`, `DefaultValue`, `MappingKey`,
 `SettingType` and `Validation`.
 
+`Config.Errors` is every setting currently failing its own validation attributes, keyed by
+code — empty for a sound config. A `ConfigSetting` also carries `Error`, `Nullable`,
+`IsNull` and `Format`.
+
 Editing another mod's config through this is possible and rarely a good idea; reading it to
 stay consistent with it is the normal use.
 
@@ -228,6 +232,8 @@ Common answers:
 | no settings screen at all | `configlib` or `autoconfiglib` is installed; ConfigKit stood down |
 | one field missing, no log line | it is `[JsonIgnore]`, or `[Browsable(false)]` — the latter is still in the file |
 | a field shows as raw JSON | nothing can edit that type; it still round-trips |
+| an edit does not reach your object | it failed a validation attribute — the message is at the bottom of the window, and in `config.Errors` |
+| a number shows a text box, not a slider | its range has an open bound, or it is nullable — neither has a slider position |
 | a setting has no tooltip | no `[Description]`, and no `.xml` doc file shipped beside the dll |
 | a field says *not editable* | nothing can construct it — an interface, an abstract class, or a cycle |
 | a key marked with `!` | `[DataType("blockcode")]` and the key names nothing loaded |

@@ -51,7 +51,10 @@ with screenshots, and **[docs/INTEGRATING.md](docs/INTEGRATING.md)** is the API 
 
 A settings class needs only stock .NET attributes (`[Description]`, `[Range]`,
 `[Category]`), so it keeps no reference to ConfigKit and still compiles and runs
-without it.
+without it. It reads what is already there, too: your `///` doc comments become the
+tooltips, `[DisplayFormat]` decides how a number reads, validation attributes are enforced
+with the messages you wrote — your own `ValidationAttribute` included — and a `float?`
+whose null means something keeps it.
 
 Writing your first config with no C# at all? **[docs/CONFIG-FORMAT.md](docs/CONFIG-FORMAT.md)**
 is the reference for `configlib-patches.json`: settings, patches, JSON paths and

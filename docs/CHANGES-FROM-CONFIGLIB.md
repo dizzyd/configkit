@@ -39,9 +39,10 @@ marked **ours** was introduced by this project, mostly by the GUI rewrite.
 
 ## Added
 
-- **45 in-game tests** across three configurations: singleplayer, two-process
+- **141 in-game tests** across three configurations: singleplayer, two-process
   multiplayer, and a run with configlib installed. Includes standing regression tests for
-  every bug below.
+  every bug below, and a recorded baseline of the previous release's behaviour across ten
+  real mods' configs.
 - **A two-process multiplayer test tier** (contributed to
   [vstestkit](https://github.com/dizzyd/vstestkit)): a real server and a client joined
   over a socket, because a singleplayer session never takes the sync code's other branch,
@@ -65,6 +66,37 @@ marked **ours** was introduced by this project, mostly by the GUI rewrite.
   configlib's exact parameter list. Several mods reach the library by reflection and match
   on that name and signature; without the alias they log "ConfigLib found but
   RegisterCustomManagedConfig not available" and drop their settings screen.
+
+### Structured settings
+
+configlib describes settings one flat entry at a time. ConfigKit reads the shape of a
+settings class instead, so a config that is a tree stays a tree.
+
+- **Nested classes, dictionaries and lists**, from the class alone. A sub-object becomes a
+  foldable section; a dictionary or list opens a screen of its own with a filter, Add and
+  Rename; neither needs a line of UI code. Five levels deep, cycles detected.
+- **Your `///` doc comments become the tooltips**, read from the XML documentation file
+  beside the assembly. Most config classes are already documented and asking an author to
+  repeat that text in a `[Description]` is duplication for its own sake. `[Description]`
+  still wins where a member has both.
+- **Validation attributes are enforced, with the author's own messages** - `[Range]`,
+  `[StringLength]`, `[RegularExpression]`, and any custom `ValidationAttribute`, each asked
+  through `GetValidationResult` with a real `ValidationContext`. A failing value stays on
+  screen to be corrected and is not assigned to the mod's object.
+- **Nullable value types keep their null.** `float?` reads empty rather than `0` and can be
+  cleared back to null; `bool?` is a three-way dropdown rather than a switch. For a member
+  where null means "no limit" and 0 means "none allowed", the difference is the whole
+  meaning of the setting.
+- **`[DisplayFormat]`** so a ratio reads `95.00 %` rather than `0.95`, on the readout and
+  never in the box you type into.
+- **`[Key]`** names a list row by one of its own fields instead of `#0 #1`, and
+  **`[DataType("blockcode")]`** flags a dictionary key that looks like a real code and is
+  not.
+- **`SetConfigDisplayName`** for a mod registering several configs, which needs a domain
+  each and would otherwise offer the player a list of raw domain strings.
+- **An open `[Range]` bound is a number input, not a slider.** `[Range(0, Infinity)]` means
+  "no upper limit", not a slider two billion units wide - which converted to int without
+  throwing and took the client down with it.
 
 ## Removed
 

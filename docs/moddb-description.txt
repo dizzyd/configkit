@@ -41,7 +41,14 @@ less code than you had.
 
 A settings class needs only stock .NET attributes ([Description],
 [Range], [Category]), so it keeps no reference to ConfigKit and still
-compiles and runs without it.
+compiles and runs without it. Nested classes, dictionaries and lists render
+themselves - a sub-object becomes a foldable section, a dictionary opens a screen of its own
+with a filter and an Add button, and neither needs a line of UI code.
+
+It also reads what your class already carries: your /// doc comments become the tooltips,
+[DisplayFormat] decides how a number reads, validation attributes are enforced with the
+messages you wrote - including your own ValidationAttribute - and a nullable value type
+keeps its null instead of showing it as zero.
 
 Guides:
 migrating from configlib (https://github.com/dizzyd/configkit/blob/main/docs/MIGRATING.md)
