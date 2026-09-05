@@ -193,6 +193,15 @@ public sealed class Config : IConfig, IDisposable
     internal string JsonFilePath { get; } = "";
     internal string RelativeFilePath { get; } = "";
     internal string Domain => _domain;
+    /// <summary>
+    /// Every setting currently failing its own validation, by code. Empty when the config is
+    /// sound, which is the normal case.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Errors
+        => _settings
+            .Where(entry => entry.Value.Error != null)
+            .ToDictionary(entry => entry.Key, entry => entry.Value.Error!);
+
     internal string ModName => _modName;
 
     /// <summary>Renames this config for the settings dropdown. See SetConfigDisplayName.</summary>
@@ -417,7 +426,16 @@ public sealed class Config : IConfig, IDisposable
         if (setting.Node is not { } node) return false;
 
         object? owner = OwnerFor(node, target);
-        return owner != null && setting.AssignTo(owner, node.Member);
+        if (owner == null) return false;
+
+        // Every value reaches the object here - a load from file, an edit, a sync from a
+        // server - so this is the one place worth checking, and checking it here means a
+        // value the author's own attributes reject never reaches their code. The setting
+        // keeps it so the player can see what they typed and fix it.
+        setting.Error = Validate.Check(setting, node, owner);
+        if (setting.Error != null) return false;
+
+        return setting.AssignTo(owner, node.Member);
     }
 
     /// <summary>

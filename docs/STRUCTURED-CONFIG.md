@@ -141,7 +141,7 @@ All stock .NET. `System.ComponentModel`, `System.ComponentModel.DataAnnotations`
 | Attribute | Effect |
 |---|---|
 | `[Description("…")]` | Hover text on the label |
-| `[Range(min, max)]` | Slider instead of a text box — but see *Open bounds* below |
+| `[Range(min, max)]` | Slider instead of a text box — and a real constraint, see *Validation* |
 | `[DefaultValue(x)]` | The value Reset goes back to |
 | `[AllowedValues(…)]` | Dropdown of fixed choices |
 | `[Category("Doors")]` | Puts the setting in a section called Doors |
@@ -191,6 +191,40 @@ source order across the two kinds, so fields are listed in the order you wrote t
 properties follow. Use `[Display(Order)]` if you need them interleaved. And a **section name
 may contain a comma** — `[Category("Yours, not the server's, clientside")]` is a section
 called "Yours, not the server's" with the `clientside` flag, not two sections.
+
+### Validation
+
+Every `System.ComponentModel.DataAnnotations` validation attribute is enforced, with the
+message its author wrote:
+
+```csharp
+[Range(1, 10, ErrorMessage = "Pick a number of doors between 1 and 10")]
+public int Doors = 4;
+```
+
+A value that fails is **kept on screen so it can be corrected, and not assigned to your
+object** — your mod keeps the last value its own attributes agreed to, and the message
+appears at the bottom of the window. `config.Errors` has the same thing in code.
+
+This is what makes an open bound mean something: `[Range(0, double.PositiveInfinity)]` takes
+the number input rather than a slider, and typing `-5` into it is now refused rather than
+stored.
+
+**Your own validators work too** — anything deriving from `ValidationAttribute`:
+
+```csharp
+public class EvenAttribute : ValidationAttribute
+{
+    protected override ValidationResult IsValid(object? value, ValidationContext context)
+        => value is int n && n % 2 != 0
+            ? new ValidationResult($"{context.DisplayName} must be even")
+            : ValidationResult.Success!;
+}
+```
+
+Each is asked through `GetValidationResult` with a real `ValidationContext`, so a validator
+can read the rest of the object it lives on. One that throws is reported against its own
+setting rather than escaping into the GUI.
 
 ### Open bounds
 

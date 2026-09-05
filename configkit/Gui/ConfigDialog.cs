@@ -124,6 +124,39 @@ public class ConfigDialog : GuiDialog
     public IReadOnlyDictionary<string, ConfigSetting> RenderedSettings => _settingsByKey;
 
     /// <summary>
+    /// The message shown when a setting fails its own validation attributes, or "" when the
+    /// config is sound.
+    /// </summary>
+    public string ErrorText { get; private set; } = "";
+
+    private static CairoFont ErrorFont => CairoFont.WhiteSmallText().WithColor(GuiStyle.ErrorTextColor);
+
+    /// <summary>
+    /// Puts the current validation errors on the status line. Called after composing and
+    /// after every edit, and it never recomposes - a dynamic text element is exactly the
+    /// thing that can change under a player mid-keystroke without disturbing their cursor.
+    /// </summary>
+    private void ShowErrors()
+    {
+        if (!_configs.TryGetValue(_domain, out Config? config)) return;
+
+        IReadOnlyDictionary<string, string> errors = config.Errors;
+
+        ErrorText = errors.Count switch
+        {
+            0 => "",
+            1 => $"{LabelForCode(config, errors.Keys.First())}: {errors.Values.First()}",
+            _ => $"{LabelForCode(config, errors.Keys.First())}: {errors.Values.First()}"
+                 + $"  (and {errors.Count - 1} more)"
+        };
+
+        SingleComposer?.GetDynamicText("errors")?.SetNewText(ErrorText);
+    }
+
+    private static string LabelForCode(Config config, string code)
+        => config.GetSetting(code) is ConfigSetting setting ? LabelFor(setting) : code;
+
+    /// <summary>
     /// What the mod dropdown offers, in the order a player sees it.
     /// </summary>
     public IReadOnlyList<string> DisplayNames => _domains.Select(DisplayName).ToList();
@@ -410,8 +443,22 @@ public class ConfigDialog : GuiDialog
     public override void OnGuiOpened()
     {
         base.OnGuiOpened();
+
+        // Every edit runs through the config, which sets each setting's Error before raising
+        // this - so by the time it arrives the status line only has to be redrawn.
+        foreach (Config config in _configs.Values) config.SettingChanged += OnAnySettingChanged;
+
         Compose();
     }
+
+    public override void OnGuiClosed()
+    {
+        foreach (Config config in _configs.Values) config.SettingChanged -= OnAnySettingChanged;
+
+        base.OnGuiClosed();
+    }
+
+    private void OnAnySettingChanged(ISetting _) => ShowErrors();
 
     private string DisplayName(string domain)
     {
@@ -468,6 +515,9 @@ public class ConfigDialog : GuiDialog
         ElementBounds saveBounds = ElementBounds.Fixed(0, buttonY, 90, 26);
         ElementBounds reloadBounds = ElementBounds.Fixed(100, buttonY, 90, 26);
         ElementBounds defaultsBounds = ElementBounds.Fixed(200, buttonY, 150, 26);
+        // Its own line under the buttons, full width. Beside them it had a third of the
+        // width, and a two-line message was clipped by the bottom of the dialog.
+        ElementBounds errorBounds = ElementBounds.Fixed(0, buttonY + 34, DialogWidth - 40, 24);
 
         ElementBounds bgBounds = ElementBounds.Fill.WithFixedPadding(GuiStyle.ElementToDialogPadding);
         bgBounds.BothSizing = ElementSizing.FitToChildren;
@@ -533,9 +583,15 @@ public class ConfigDialog : GuiDialog
             .AddSmallButton("Reload", OnReload, reloadBounds, EnumButtonStyle.Normal)
             .AddSmallButton(_confirmDefaults ? "Sure? Click again" : "Restore defaults",
                 OnDefaults, defaultsBounds, EnumButtonStyle.Normal)
+            // A live line rather than part of a row: an error appears and clears on every
+            // keystroke, and growing a row to hold a message would relayout the window under
+            // the player's cursor as they typed.
+            .AddDynamicText("", ErrorFont, errorBounds, "errors")
             .EndChildElements();
 
         SingleComposer = composer.Compose();
+
+        ShowErrors();
 
         foreach (Action action in _afterCompose) action();
 

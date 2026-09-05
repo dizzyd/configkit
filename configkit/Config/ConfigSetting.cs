@@ -72,6 +72,16 @@ public class ConfigSetting : ISetting
 
     /// <summary>Whether this setting currently holds null.</summary>
     public bool IsNull => Value.Token == null || Value.Token.Type == JTokenType.Null;
+
+    /// <summary>
+    /// Why this setting's current value is not acceptable, from the author's own validation
+    /// attributes, or null when it is fine. An invalid value stays here to be seen and
+    /// corrected; it is not assigned onto the config object.
+    /// </summary>
+    public string? Error { get; internal set; }
+
+    /// <summary>This setting's value as the member's own type. For the validators.</summary>
+    internal object? CoercedValue(Type memberType) => CoerceTo(memberType);
     /// <summary>
     /// The member this setting was reflected from, for a managed config. Null for one built
     /// from a definition file, which has no class behind it.
