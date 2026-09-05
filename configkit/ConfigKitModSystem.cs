@@ -486,7 +486,9 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
                 eventDataTree.SetString("value", setting.Value.AsString());
                 break;
             case ConfigSettingType.Other:
-                eventDataTree.SetAttribute("value", setting.Value.ToAttribute());
+                // Never a raw ToAttribute: it yields null for a JSON null, and a null entry
+                // in a tree is a NullReferenceException the moment anything writes it.
+                if (Attributes.For(setting.Value) is { } attribute) eventDataTree["value"] = attribute;
                 break;
         }
         string eventName = string.Format(ConfigChangedEvent, domain);
@@ -514,7 +516,9 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
                 eventDataTree.SetString("value", setting.Value.AsString());
                 break;
             case ConfigSettingType.Other:
-                eventDataTree.SetAttribute("value", setting.Value.ToAttribute());
+                // Never a raw ToAttribute: it yields null for a JSON null, and a null entry
+                // in a tree is a NullReferenceException the moment anything writes it.
+                if (Attributes.For(setting.Value) is { } attribute) eventDataTree["value"] = attribute;
                 break;
         }
         string eventName = string.Format(ConfigLoadedEvent, domain);

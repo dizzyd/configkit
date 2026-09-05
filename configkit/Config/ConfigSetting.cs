@@ -360,8 +360,10 @@ public class ConfigSetting : ISetting
     /// </summary>
     private object? Structured(JsonObject value, Type type)
     {
-        // JsonObject's own conversion, for the members that actually want game attributes.
-        if (typeof(ITreeAttribute).IsAssignableFrom(type)) return value.ToAttribute();
+        // JsonObject's own conversion, for the members that actually want game attributes -
+        // through the null strip, because a tree holding a null cannot be serialised and the
+        // mod receiving it would be handed a landmine rather than a config.
+        if (typeof(ITreeAttribute).IsAssignableFrom(type)) return Attributes.For(value);
 
         return value.Token?.ToObject(type);
     }
