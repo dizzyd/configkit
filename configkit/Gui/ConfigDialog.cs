@@ -32,9 +32,9 @@ public class ConfigDialog : GuiDialog
     private const double DialogWidth = 700;
     private const double MaxContentHeight = 420;
     private const double MinContentHeight = 90;
-    private const double RowHeight = 32;
+    private const double RowHeight = 36;
     private const double RowGap = 6;
-    private const double LabelWidth = 330;
+    private const double LabelWidth = 320;
     private const double ControlWidth = 250;
     private const double ValueWidth = 54;
     private const double ResetWidth = 56;
@@ -61,7 +61,7 @@ public class ConfigDialog : GuiDialog
     private const double DeleteWidth = 28;
     private const double MarkWidth = 22;
     private const double EntryGap = 12;
-    private const double SectionHeight = 34;
+    private const double SectionHeight = 42;
 
     private ElementBounds? _contentBounds;
     private double _contentHeight;
@@ -603,7 +603,7 @@ public class ConfigDialog : GuiDialog
 
             container.Add(new GuiElementDynamicText(capi,
                 serverOwned ? LabelFor(setting) + " (server)" : LabelFor(setting),
-                locked ? CairoFont.WhiteDetailText().WithColor(GuiStyle.ColorParchment) : CairoFont.WhiteDetailText(),
+                locked ? CairoFont.WhiteSmallText().WithColor(GuiStyle.ColorParchment) : CairoFont.WhiteSmallText(),
                 labelBounds));
 
             if (!string.IsNullOrEmpty(setting.Comment))
@@ -675,9 +675,10 @@ public class ConfigDialog : GuiDialog
             // centred - which is all GuiElementTextButton does by default - made every
             // heading float in the middle while its rows sat at the margin.
             GuiElementTextButton toggle = new(capi, label,
-                CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
+                CairoFont.WhiteSmallText().WithWeight(Cairo.FontWeight.Bold),
+                CairoFont.WhiteSmallText().WithWeight(Cairo.FontWeight.Bold).WithColor(GuiStyle.ActiveButtonTextColor),
                 () => ToggleSection(title),
-                ElementBounds.Fixed(0, y + 4, DialogWidth - 40, 26), EnumButtonStyle.Small);
+                ElementBounds.Fixed(0, y + 2, DialogWidth - 40, 32), EnumButtonStyle.Small);
 
             toggle.SetOrientation(EnumTextOrientation.Left);
             container.Add(toggle);
@@ -1287,7 +1288,7 @@ public class ConfigDialog : GuiDialog
             ElementBounds labelBounds = ElementBounds.Fixed(0, y + 4, LabelWidth, RowHeight);
             ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
 
-            container.Add(new GuiElementDynamicText(capi, label, CairoFont.WhiteDetailText(), labelBounds));
+            container.Add(new GuiElementDynamicText(capi, label, CairoFont.WhiteSmallText(), labelBounds));
 
             if (!string.IsNullOrEmpty(child.Comment))
             {

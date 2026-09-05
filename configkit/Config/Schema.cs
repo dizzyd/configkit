@@ -179,12 +179,16 @@ internal static class SchemaBuilder
         Stack<Type> visiting = new();
         visiting.Push(type);
 
+        // One counter for the whole walk, not one per object. Restarting it inside a nested
+        // class gave that class's members the same positions as the config's own first
+        // members, so a section declared near the bottom sorted to the top.
+        int[] position = [0];
+
         List<SchemaNode> nodes = [];
-        int position = 0;
 
         foreach (MemberInfo member in Members(type))
         {
-            SchemaNode? node = Build(member, prefix: "", section: null, visiting, depth: 1, notices, position++);
+            SchemaNode? node = Build(member, prefix: "", section: null, visiting, depth: 1, notices, position);
             if (node != null) nodes.Add(node);
         }
 
@@ -199,14 +203,22 @@ internal static class SchemaBuilder
     }
 
     /// <summary>
-    /// Public instance fields and properties, in the order the runtime reports them - which
-    /// for a single class is declaration order, and is what fixes each setting's sort weight
-    /// and therefore its position on screen. Reordering here reorders every existing config
-    /// screen, so this enumeration deliberately matches what the old walk did.
+    /// Public instance fields and properties: fields in the order they were written, then
+    /// properties in the order they were written.
+    ///
+    /// Reflection cannot give true source order across the two kinds - they live in separate
+    /// metadata tables, so their tokens are not comparable - and GetMembers' own order puts
+    /// every property first, which sent a whole section to the top of the screen because one
+    /// member of it happened to be a get-only collection. Fields lead because a config class
+    /// is nearly always fields; a class that needs them interleaved says so with
+    /// [Display(Order)].
     /// </summary>
     private static IEnumerable<MemberInfo> Members(Type type)
     {
-        foreach (MemberInfo member in type.GetMembers(BindingFlags.Public | BindingFlags.Instance))
+        foreach (MemberInfo member in type
+            .GetMembers(BindingFlags.Public | BindingFlags.Instance)
+            .OrderBy(member => member is FieldInfo ? 0 : 1)
+            .ThenBy(member => member.MetadataToken))
         {
             switch (member)
             {
@@ -225,7 +237,7 @@ internal static class SchemaBuilder
         }
     }
 
-    private static SchemaNode? Build(MemberInfo member, string prefix, string? section, Stack<Type> visiting, int depth, List<string> notices, int position)
+    private static SchemaNode? Build(MemberInfo member, string prefix, string? section, Stack<Type> visiting, int depth, List<string> notices, int[] position)
     {
         Type memberType = (member as PropertyInfo)?.PropertyType ?? ((FieldInfo)member).FieldType;
 
@@ -254,7 +266,7 @@ internal static class SchemaBuilder
             // "Declaration order" is GetMembers order, which for a class mixing fields and
             // properties is not quite source order. Config classes are almost always all
             // fields, and this is the same order the walk this replaced used.
-            Weight = member.GetCustomAttribute<DisplayAttribute>()?.GetOrder() ?? (UnorderedBase + position),
+            Weight = member.GetCustomAttribute<DisplayAttribute>()?.GetOrder() ?? (UnorderedBase + position[0]++),
         };
 
         node.Path = prefix.Length == 0 ? node.Code : $"{prefix}/{node.Code}";
@@ -269,7 +281,7 @@ internal static class SchemaBuilder
 
         ApplyCategory(member, node, inherited: section);
 
-        Classify(node, visiting, depth, notices);
+        Classify(node, visiting, depth, notices, position);
 
         if (CannotBeAssigned(node) && node.Kind is not (SchemaKind.Dictionary or SchemaKind.List))
         {
@@ -306,6 +318,12 @@ internal static class SchemaBuilder
 
         if (category == null) return;
 
+        // The flag words are lifted out and everything else is put back together, commas and
+        // all. Taking the last unrecognised piece as the name turned
+        // [Category("8 Yours, not the server's, clientside")] into a section called
+        // "not the server's" - a name with a comma in it is a name, not a list.
+        List<string> rest = [];
+
         foreach (string raw in category.Split(','))
         {
             string trimmed = raw.Trim();
@@ -313,17 +331,16 @@ internal static class SchemaBuilder
 
             switch (trimmed.Replace(" ", "").Replace("_", "").ToLowerInvariant())
             {
-                case "clientside":
-                    node.ClientSide = true;
-                    break;
-                case "logarithmic":
-                    node.Logarithmic = true;
-                    break;
-                default:
-                    node.Section = trimmed;
-                    node.SectionExplicit = true;
-                    break;
+                case "clientside": node.ClientSide = true; break;
+                case "logarithmic": node.Logarithmic = true; break;
+                default: rest.Add(trimmed); break;
             }
+        }
+
+        if (rest.Count > 0)
+        {
+            node.Section = string.Join(", ", rest);
+            node.SectionExplicit = true;
         }
     }
 
@@ -333,7 +350,7 @@ internal static class SchemaBuilder
     /// before dictionaries renders every dictionary as a list of pairs. Scalars come first of
     /// all, because string is enumerable.
     /// </summary>
-    private static void Classify(SchemaNode node, Stack<Type> visiting, int depth, List<string> notices)
+    private static void Classify(SchemaNode node, Stack<Type> visiting, int depth, List<string> notices, int[] position)
     {
         Type type = Nullable.GetUnderlyingType(node.MemberType) ?? node.MemberType;
 
@@ -385,7 +402,7 @@ internal static class SchemaBuilder
 
         if (type.IsClass || (type.IsValueType && !type.IsPrimitive))
         {
-            BuildObject(node, type, visiting, depth, notices);
+            BuildObject(node, type, visiting, depth, notices, position);
             return;
         }
 
@@ -439,8 +456,9 @@ internal static class SchemaBuilder
 
     private static SchemaNode Describe(Type type, string path, Stack<Type> visiting, int depth, List<string> notices)
     {
+        // A container's key and value are shapes, not members, so they take no position.
         SchemaNode node = new() { MemberType = type, Path = path, Code = "" };
-        Classify(node, visiting, depth, notices);
+        Classify(node, visiting, depth, notices, [0]);
 
         if (CannotBeAssigned(node) && node.Kind is not (SchemaKind.Dictionary or SchemaKind.List))
         {
@@ -450,7 +468,7 @@ internal static class SchemaBuilder
         return node;
     }
 
-    private static void BuildObject(SchemaNode node, Type type, Stack<Type> visiting, int depth, List<string> notices)
+    private static void BuildObject(SchemaNode node, Type type, Stack<Type> visiting, int depth, List<string> notices, int[] position)
     {
         // Two members in the published corpus hold their own declaring type - a handle back
         // to the config rather than config data. Walking either is an infinite recursion at
@@ -486,11 +504,9 @@ internal static class SchemaBuilder
         visiting.Push(type);
         try
         {
-            int position = 0;
-
             foreach (MemberInfo member in Members(type))
             {
-                SchemaNode? child = Build(member, node.Path, ChildSection(node), visiting, depth + 1, notices, position++);
+                SchemaNode? child = Build(member, node.Path, ChildSection(node), visiting, depth + 1, notices, position);
                 if (child == null) continue;
 
                 child.Parent = node;

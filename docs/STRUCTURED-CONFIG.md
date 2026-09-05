@@ -172,9 +172,15 @@ property, indexer and event, and a config class is nearly always public fields, 
 `[Display(Name = "…")]` instead — it allows fields and does the same job. `[DisplayName]` is
 there for the properties case.
 
-Rows sit in the order they are declared. `[Display(Order = n)]` moves one; anything without
-it sorts after everything that has it, which is the convention `DisplayAttribute` documents
-for itself.
+Rows sit in the order they are declared, and so do sections — a section sits where its
+earliest member does. `[Display(Order = n)]` moves either; anything without it sorts after
+everything that has it, which is the convention `DisplayAttribute` documents for itself.
+
+Two details worth knowing. **Fields come before properties**: reflection cannot give true
+source order across the two kinds, so fields are listed in the order you wrote them and
+properties follow. Use `[Display(Order)]` if you need them interleaved. And a **section name
+may contain a comma** — `[Category("Yours, not the server's, clientside")]` is a section
+called "Yours, not the server's" with the `clientside` flag, not two sections.
 
 ### `[DataType]`, and why it earns its place
 

@@ -108,6 +108,26 @@ public class SchemaTests
 
         [Category("Doors")]
         public int Delay = 10;
+
+        /// <summary>A name with a comma in it is a name, not a list of two.</summary>
+        [Category("Yours, not the server's, clientside")]
+        public bool Mine = true;
+    }
+
+    /// <summary>
+    /// GetMembers reports every property before every field, so one [Category] on a property
+    /// used to send its whole section to the top of the screen.
+    /// </summary>
+    public class MixedMembers
+    {
+        [Category("First")]
+        public int A = 1;
+
+        [Category("Second")]
+        public List<string> B { get; } = new();
+
+        [Category("Third")]
+        public int C = 3;
     }
 
     public class ExclusionSettings
@@ -382,6 +402,66 @@ public class SchemaTests
             $"expected a tidy row label; on screen: {string.Join(", ", dialog.RenderedLabels)}");
 
         dialog.TryClose();
+    }
+
+    /// <summary>
+    /// [Category] lifts out its flag words and keeps the rest as written, commas included.
+    /// Taking the last unrecognised piece made "Yours, not the server's" into a section
+    /// called "not the server's".
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task ASectionNameMayContainAComma()
+    {
+        await OnServer();
+
+        Config config = Fresh(new TaggedSettings(), "schema-comma", "configkit-schema-comma.json");
+
+        Assert.True(SeparatorTitles(config).Contains("Yours, not the server's"),
+            $"the name was truncated; got {string.Join(" | ", SeparatorTitles(config))}");
+
+        // And the flag it was sharing the attribute with still applies.
+        Assert.True(((ConfigSetting)config.GetSetting("Mine")!).ClientSide);
+    }
+
+    /// <summary>
+    /// Fields come out in the order they were written, then properties in the order they
+    /// were written. Reflection cannot do better than that - the two kinds live in separate
+    /// metadata tables - and the alternative was GetMembers' own order, which puts every
+    /// property first and so sent a whole section to the top of the screen.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task FieldsKeepTheirOrderAndPropertiesFollowThem()
+    {
+        await OnServer();
+
+        Config config = Fresh(new MixedMembers(), "schema-order", "configkit-schema-order.json");
+
+        Assert.Equal("First,Third,Second", string.Join(",", SeparatorTitles(config)));
+    }
+
+    public class OrderedMembers
+    {
+        [Category("First")]
+        public int A = 1;
+
+        [Display(Order = 1)]
+        [Category("Second")]
+        public List<string> B { get; } = new();
+
+        [Display(Order = 2)]
+        [Category("Third")]
+        public int C = 3;
+    }
+
+    /// <summary>And a class that needs them interleaved says so.</summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task DisplayOrderInterleavesFieldsAndProperties()
+    {
+        await OnServer();
+
+        Config config = Fresh(new OrderedMembers(), "schema-order2", "configkit-schema-order2.json");
+
+        Assert.Equal("Second,Third,First", string.Join(",", SeparatorTitles(config)));
     }
 
     private static List<string> SeparatorTitles(Config config)

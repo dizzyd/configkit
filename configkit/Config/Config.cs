@@ -737,10 +737,15 @@ public sealed class Config : IConfig, IDisposable
             settings.Add(DefinitionFor(node, owner, domain));
         }
 
+        // A section sits where its earliest member does. Taking first-appearance order
+        // instead meant [Display(Order)] could move a row within its section but never move
+        // the section, so a member ordered to the front stayed behind whatever was declared
+        // above it.
         IEnumerable<string> sections = flat
             .Where(entry => entry.node.Section != null)
-            .Select(entry => entry.node.Section!)
-            .Distinct();
+            .GroupBy(entry => entry.node.Section!)
+            .OrderBy(group => group.Min(entry => entry.node.Weight))
+            .Select(group => group.Key);
 
         foreach (string section in sections)
         {
