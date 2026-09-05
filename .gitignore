@@ -8,5 +8,7 @@ Releases/
 # Written by the csproj on first build; points at a local game install.
 configkit/Properties/localSettings.props
 
-# Screenshots are generated, not authored - see docs/screenshots/README.md.
-docs/screenshots/*.png
+# The reference shots are regenerated on demand, not authored - see
+# docs/screenshots/README.md. The ck-* set is different: it is embedded in
+# docs/STRUCTURED-CONFIG.md, so it has to be in the repo or the guide is broken.
+docs/screenshots/settings-*.png
