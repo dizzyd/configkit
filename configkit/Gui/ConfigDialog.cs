@@ -752,9 +752,17 @@ public class ConfigDialog : GuiDialog
             if (!Matches(section, block)) continue;
 
             string key = $"setting-{index++}";
+
+            // How tall this row is, decided before the measuring pass bails out. It used to
+            // add RowHeight for every row regardless, which is right until a row is taller
+            // than one line: the window was then sized for a raw-JSON row it had counted as
+            // an ordinary one, and clipped the box it had just made room for.
+            bool isContainer = setting.Node is { Kind: SchemaKind.Dictionary or SchemaKind.List };
+            double rowHeight = isContainer ? RowHeight : ControlHeight(setting);
+
             if (container == null)
             {
-                y += RowHeight + RowGap;
+                y += rowHeight + RowGap;
                 continue;
             }
 
@@ -763,18 +771,20 @@ public class ConfigDialog : GuiDialog
             bool serverOwned = IsServerControlled(setting);
             bool locked = serverOwned || setting.ReadOnly;
             SchemaNode? node = setting.Node;
-            bool container_ = node is { Kind: SchemaKind.Dictionary or SchemaKind.List };
+            bool container_ = isContainer;
 
             if (!locked && !container_) _settingsByKey[key] = setting;
             if (container_) _settingsByKey[key] = setting;
 
-            // Most rows are one line tall. A raw-JSON box is as tall as its content, within
-            // reason, and the row has to be told before anything is placed in it - otherwise
-            // the y cursor advances one line and the box is drawn over everything below.
-            double rowHeight = container_ ? RowHeight : ControlHeight(setting);
+            // Raw JSON is a document, not a value: it gets the label's own line and then the
+            // full width of the row beneath it. In the control column it had 250px, which is
+            // the width of a slider and no use at all for reading JSON.
+            bool document = !container_ && setting.SettingType == ConfigSettingType.Other;
 
             ElementBounds labelBounds = ElementBounds.Fixed(0, y + 4, LabelWidth, RowHeight);
-            ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, rowHeight - 4);
+            ElementBounds controlBounds = document
+                ? ElementBounds.Fixed(0, y + RowHeight, RowWidth, rowHeight - RowHeight - 4)
+                : ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, rowHeight - 4);
 
             container.Add(new GuiElementDynamicText(capi,
                 serverOwned ? LabelFor(setting) + " (server)" : LabelFor(setting),
@@ -1133,17 +1143,29 @@ public class ConfigDialog : GuiDialog
     {
         if (setting.SettingType != ConfigSettingType.Other) return RowHeight;
 
-        double lines = MeasuredLines(setting.Value.Token?.ToString(Newtonsoft.Json.Formatting.Indented) ?? "");
+        // A label line, then as many lines as the document needs. The window scrolls, so a
+        // long value is reachable rather than clipped - the earlier six-line ceiling kept
+        // the row small and made the value unreadable instead, which is the wrong trade for
+        // the one control with no editor of its own. The ceiling that remains is only to
+        // stop a pathological value making a page with one row on it.
+        double lines = Math.Clamp(MeasuredLines(JsonText(setting)), 3, MaxJsonLines);
 
-        return RowHeight + (Math.Clamp(lines, 2, 6) - 1) * JsonLineHeight;
+        return RowHeight + RowHeight + lines * JsonLineHeight;
     }
+
+    /// <summary>
+    /// A raw value as it is both measured and shown. The two have to agree: sizing from the
+    /// indented form and displaying the compact one is what made the box look empty.
+    /// </summary>
+    private static string JsonText(ConfigSetting setting)
+        => setting.Value.Token?.ToString(Newtonsoft.Json.Formatting.Indented) ?? "";
 
     private double MeasuredLines(string text)
     {
         if (text.Length == 0) return 2;
 
         // Newlines from the indented JSON, plus what wrapping adds at this width.
-        double perLine = Math.Max(1, ControlWidth / JsonCharWidth);
+        double perLine = Math.Max(1, RowWidth / JsonCharWidth);
 
         return text.Split('\n').Sum(line => Math.Max(1, Math.Ceiling(line.Length / perLine)));
     }
@@ -1153,6 +1175,12 @@ public class ConfigDialog : GuiDialog
     // costs a little whitespace where being wrong about the row costs a readable screen.
     private const double JsonLineHeight = 20;
     private const double JsonCharWidth = 7.0;
+
+    /// <summary>The most lines a raw value is given before it has to be scrolled past.</summary>
+    private const int MaxJsonLines = 24;
+
+    /// <summary>The full width of a row, label column through to the far edge of Reset.</summary>
+    private const double RowWidth = LabelWidth + 16 + ControlWidth + ResetGap + ResetWidth;
 
     private void Remember(string key, GuiElementContainer container, GuiElement element)
     {
@@ -1456,7 +1484,10 @@ public class ConfigDialog : GuiDialog
                 break;
 
             case GuiElementTextArea area:
-                area.SetValue(setting.Value.ToString());
+                // The same form ControlHeight measured. Showing the compact token instead
+                // put 115 characters of one-line JSON into a box sized for six indented
+                // ones, which looked like a large empty box with two wrapped lines in it.
+                area.SetValue(JsonText(setting));
                 break;
 
             case GuiElementNumberInput number:
