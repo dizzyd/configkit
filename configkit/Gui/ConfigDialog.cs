@@ -6,6 +6,7 @@
 using ConfigKit.Formatting;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -122,6 +123,22 @@ public class ConfigDialog : GuiDialog
     /// composed, and rebuilt whenever the selected mod changes.
     /// </summary>
     public IReadOnlyDictionary<string, ConfigSetting> RenderedSettings => _settingsByKey;
+
+    /// <summary>
+    /// Where each rendered control sits and how tall it is, top to bottom. Rows are laid out
+    /// by advancing a y cursor, so a control taller than the step it advances by silently
+    /// overlaps the row beneath it - which is invisible to every test that only asks whether
+    /// a row exists.
+    /// </summary>
+    public IReadOnlyList<(string Code, double Y, double Height)> RowGeometry
+        => _settingsByKey
+            .Where(entry => _widgets.ContainsKey(entry.Key))
+            .Select(entry => (
+                entry.Value.YamlCode,
+                _widgets[entry.Key].Bounds.fixedY,
+                _widgets[entry.Key].Bounds.fixedHeight))
+            .OrderBy(entry => entry.fixedY)
+            .ToList();
 
     /// <summary>
     /// The message shown when a setting fails its own validation attributes, or "" when the
@@ -728,8 +745,13 @@ public class ConfigDialog : GuiDialog
             if (!locked && !container_) _settingsByKey[key] = setting;
             if (container_) _settingsByKey[key] = setting;
 
+            // Most rows are one line tall. A raw-JSON box is as tall as its content, within
+            // reason, and the row has to be told before anything is placed in it - otherwise
+            // the y cursor advances one line and the box is drawn over everything below.
+            double rowHeight = container_ ? RowHeight : ControlHeight(setting);
+
             ElementBounds labelBounds = ElementBounds.Fixed(0, y + 4, LabelWidth, RowHeight);
-            ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
+            ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, rowHeight - 4);
 
             container.Add(new GuiElementDynamicText(capi,
                 serverOwned ? LabelFor(setting) + " (server)" : LabelFor(setting),
@@ -766,7 +788,7 @@ public class ConfigDialog : GuiDialog
                 AddResetButton(container, setting, y, key);
             }
 
-            y += RowHeight + RowGap;
+            y += rowHeight + RowGap;
         }
 
         return y;
@@ -1053,8 +1075,14 @@ public class ConfigDialog : GuiDialog
                 break;
 
             case ConfigSettingType.Other:
-                Remember(key, container, new GuiElementTextArea(capi, bounds.WithFixedHeight(RowHeight * 2),
-                    text => OnJsonTyped(setting, text), CairoFont.WhiteDetailText()));
+                // Autoheight is on by default and grows the element to fit its text on every
+                // change, straight out of the space the layout gave it - a WearAndTear member
+                // of 844 characters drew a box 624px tall in a 72px row and buried nine rows
+                // under it. The height is decided once, by ControlHeight, and held.
+                GuiElementTextArea area = new(capi, bounds, text => OnJsonTyped(setting, text),
+                    CairoFont.WhiteDetailText()) { Autoheight = false };
+
+                Remember(key, container, area);
                 break;
 
             case ConfigSettingType.Color:
@@ -1068,6 +1096,40 @@ public class ConfigDialog : GuiDialog
                 break;
         }
     }
+
+    /// <summary>
+    /// How tall a setting's control needs to be. One line for everything with a widget of
+    /// its own; for raw JSON, as many as the text needs, between two and six.
+    ///
+    /// The ceiling matters: a member with no editor of its own can hold an arbitrarily large
+    /// document, and a row that grows without limit is a page with one row on it. Six lines
+    /// shows the shape of the value; a member this size wants the drill-down editor, and
+    /// raw JSON is the honest fallback for one that cannot have it.
+    /// </summary>
+    private double ControlHeight(ConfigSetting setting)
+    {
+        if (setting.SettingType != ConfigSettingType.Other) return RowHeight;
+
+        double lines = MeasuredLines(setting.Value.Token?.ToString(Newtonsoft.Json.Formatting.Indented) ?? "");
+
+        return RowHeight + (Math.Clamp(lines, 2, 6) - 1) * JsonLineHeight;
+    }
+
+    private double MeasuredLines(string text)
+    {
+        if (text.Length == 0) return 2;
+
+        // Newlines from the indented JSON, plus what wrapping adds at this width.
+        double perLine = Math.Max(1, ControlWidth / JsonCharWidth);
+
+        return text.Split('\n').Sum(line => Math.Max(1, Math.Ceiling(line.Length / perLine)));
+    }
+
+    // Measured against CairoFont.WhiteDetailText at the widths this dialog uses. Approximate
+    // on purpose: the exact figure comes from the font at compose time, and being a line out
+    // costs a little whitespace where being wrong about the row costs a readable screen.
+    private const double JsonLineHeight = 20;
+    private const double JsonCharWidth = 7.0;
 
     private void Remember(string key, GuiElementContainer container, GuiElement element)
     {
