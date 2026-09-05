@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Cairo;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
@@ -781,15 +782,21 @@ public class ConfigDialog : GuiDialog
             // the width of a slider and no use at all for reading JSON.
             bool document = !container_ && setting.SettingType == ConfigSettingType.Other;
 
-            ElementBounds labelBounds = ElementBounds.Fixed(0, y + 4, LabelWidth, RowHeight);
             ElementBounds controlBounds = document
                 ? ElementBounds.Fixed(0, y + RowHeight, RowWidth, rowHeight - RowHeight - 4)
                 : ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, rowHeight - 4);
 
-            container.Add(new GuiElementDynamicText(capi,
-                serverOwned ? LabelFor(setting) + " (server)" : LabelFor(setting),
-                locked ? CairoFont.WhiteSmallText().WithColor(GuiStyle.ColorParchment) : CairoFont.WhiteSmallText(),
-                labelBounds));
+            string labelText = serverOwned ? LabelFor(setting) + " (server)" : LabelFor(setting);
+            CairoFont labelFont = locked
+                ? CairoFont.WhiteSmallText().WithColor(GuiStyle.ColorParchment)
+                : CairoFont.WhiteSmallText();
+
+            // A document row's label heads its box rather than sitting beside a control, so
+            // its baseline comes from one line's worth rather than the whole tall row.
+            double baseline = Baseline(labelFont, y, document ? RowHeight : controlBounds.fixedHeight);
+            ElementBounds labelBounds = OnBaseline(labelText, labelFont, baseline, 0, LabelWidth);
+
+            container.Add(new GuiElementDynamicText(capi, labelText, labelFont, labelBounds));
 
             if (!string.IsNullOrEmpty(setting.Comment))
             {
@@ -1182,6 +1189,41 @@ public class ConfigDialog : GuiDialog
     /// <summary>The full width of a row, label column through to the far edge of Reset.</summary>
     private const double RowWidth = LabelWidth + 16 + ControlWidth + ResetGap + ResetWidth;
 
+    /// <summary>
+    /// The baseline every piece of text in a row sits on.
+    ///
+    /// GuiElementDynamicText draws from the top of its bounds, so a label handed the row's
+    /// own y sat about ten pixels above the middle of the switch or slider beside it. But
+    /// centring each text box independently is not the fix: the label and the slider readout
+    /// use different fonts, so their boxes are different heights and centring both leaves
+    /// their baselines a couple of pixels apart - the kind of wrongness that is harder to see
+    /// and worse to look at.
+    ///
+    /// So the row picks one baseline and every text element is placed against it. Its
+    /// position centres the *cap height* rather than the line box, because a line box carries
+    /// room for descenders whether or not the text has any: centring that puts a label with
+    /// no descender visibly low.
+    /// </summary>
+    private double Baseline(CairoFont font, double y, double controlHeight)
+    {
+        FontExtents extents = font.GetFontExtents();
+        double capHeight = extents.Ascent - extents.Descent;
+
+        return y + (controlHeight + capHeight) / 2;
+    }
+
+    /// <summary>
+    /// Bounds for text whose baseline lands on the row's, given its own font's ascent. A
+    /// wrapped label grows downwards from that first baseline, as a paragraph does.
+    /// </summary>
+    private ElementBounds OnBaseline(string text, CairoFont font, double baseline, double x, double width)
+    {
+        double height = capi.Gui.Text.GetMultilineTextHeight(font, text, width);
+
+        return ElementBounds.Fixed(x, baseline - font.GetFontExtents().Ascent, width,
+            Math.Max(RowHeight, height));
+    }
+
     private void Remember(string key, GuiElementContainer container, GuiElement element)
     {
         _widgets[key] = element;
@@ -1264,11 +1306,15 @@ public class ConfigDialog : GuiDialog
     private void AddSliderControl(GuiElementContainer container, ConfigSetting setting, ElementBounds bounds, string key)
     {
         ElementBounds sliderBounds = bounds.FlatCopy().WithFixedWidth(bounds.fixedWidth - ValueWidth - 8);
-        ElementBounds valueBounds = ElementBounds.Fixed(
-            bounds.fixedX + bounds.fixedWidth - ValueWidth, bounds.fixedY + 2, ValueWidth, bounds.fixedHeight);
+        // On the row's baseline, taken from the label's font rather than the readout's own,
+        // so the number and the label it belongs to sit on one line.
+        CairoFont readoutFont = CairoFont.WhiteDetailText().WithOrientation(EnumTextOrientation.Right);
 
-        GuiElementDynamicText readout = new(capi, ReadoutText(setting),
-            CairoFont.WhiteDetailText().WithOrientation(EnumTextOrientation.Right), valueBounds);
+        ElementBounds valueBounds = OnBaseline(ReadoutText(setting), readoutFont,
+            Baseline(CairoFont.WhiteSmallText(), bounds.fixedY, bounds.fixedHeight),
+            bounds.fixedX + bounds.fixedWidth - ValueWidth, ValueWidth);
+
+        GuiElementDynamicText readout = new(capi, ReadoutText(setting), readoutFont, valueBounds);
 
         GuiElementSlider slider = new(capi, value =>
         {
@@ -1720,8 +1766,9 @@ public class ConfigDialog : GuiDialog
 
             string key = $"field-{index++}";
 
-            ElementBounds labelBounds = ElementBounds.Fixed(0, y + 4, LabelWidth, RowHeight);
             ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
+            ElementBounds labelBounds = OnBaseline(label, CairoFont.WhiteSmallText(),
+                Baseline(CairoFont.WhiteSmallText(), y, controlBounds.fixedHeight), 0, LabelWidth);
 
             container.Add(new GuiElementDynamicText(capi, label, CairoFont.WhiteSmallText(), labelBounds));
 
