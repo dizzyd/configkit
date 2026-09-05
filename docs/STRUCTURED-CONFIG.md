@@ -38,6 +38,8 @@ api.ModLoader.GetModSystem<ConfigKitModSystem>()
 ```
 
 That's the whole integration. No draw delegate, no `ControlButtons`, no widget ids.
+[INTEGRATING.md](INTEGRATING.md) covers the API around it: the callbacks, when the values are
+there, what the server does to them, and what to read when a field does not appear.
 
 ---
 

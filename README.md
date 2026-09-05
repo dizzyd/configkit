@@ -47,7 +47,7 @@ Most mods need **no changes**. Find your case in
 Nested classes, dictionaries and lists all work: a sub-object becomes a foldable section, a
 dictionary becomes a screen of its own with a filter and an Add button, and neither needs a
 line of UI code. **[docs/STRUCTURED-CONFIG.md](docs/STRUCTURED-CONFIG.md)** is the guide,
-with screenshots.
+with screenshots, and **[docs/INTEGRATING.md](docs/INTEGRATING.md)** is the API around it.
 
 A settings class needs only stock .NET attributes (`[Description]`, `[Range]`,
 `[Category]`), so it keeps no reference to ConfigKit and still compiles and runs
