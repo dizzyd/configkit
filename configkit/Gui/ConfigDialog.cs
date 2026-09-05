@@ -37,6 +37,16 @@ public class ConfigDialog : GuiDialog
     private const double RowHeight = 36;
     private const double RowGap = 6;
     private const double LabelWidth = 320;
+
+    /// <summary>
+    /// How far a row's label sits in from the margin.
+    ///
+    /// A section heading is a full-width button whose text is inset by its own padding and
+    /// the two spaces in front of its marker, so rows left at x=0 began a good ten pixels to
+    /// the left of the heading they belong to - reading as though the heading were indented
+    /// rather than the rows.
+    /// </summary>
+    private const double LabelIndent = 12;
     private const double ControlWidth = 250;
     // Wide enough for a formatted readout, not just a bare number: [DisplayFormat] turns
     // 0.95 into "95.00 %", which wrapped onto a second line at the 54 this used to be.
@@ -794,7 +804,8 @@ public class ConfigDialog : GuiDialog
             // A document row's label heads its box rather than sitting beside a control, so
             // its baseline comes from one line's worth rather than the whole tall row.
             double baseline = Baseline(labelFont, y, document ? RowHeight : controlBounds.fixedHeight);
-            ElementBounds labelBounds = OnBaseline(labelText, labelFont, baseline, 0, LabelWidth);
+            ElementBounds labelBounds = OnBaseline(labelText, labelFont, baseline,
+                LabelIndent, LabelWidth - LabelIndent);
 
             container.Add(new GuiElementDynamicText(capi, labelText, labelFont, labelBounds));
 
@@ -1768,7 +1779,8 @@ public class ConfigDialog : GuiDialog
 
             ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
             ElementBounds labelBounds = OnBaseline(label, CairoFont.WhiteSmallText(),
-                Baseline(CairoFont.WhiteSmallText(), y, controlBounds.fixedHeight), 0, LabelWidth);
+                Baseline(CairoFont.WhiteSmallText(), y, controlBounds.fixedHeight),
+                LabelIndent, LabelWidth - LabelIndent);
 
             container.Add(new GuiElementDynamicText(capi, label, CairoFont.WhiteSmallText(), labelBounds));
 
