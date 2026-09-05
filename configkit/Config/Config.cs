@@ -1055,9 +1055,29 @@ public sealed class Config : IConfig, IDisposable
                     mapping.Add(enumNames[index], enumValues[index]);
                 }
                 definition.Add("mapping", mapping);
-                int indexClamped = Math.Max(enumValues.IndexOf(definition["default"]?.Value<int>() ?? 0), 0);
+
+                // An enum is stored by name, so the numeric default is swapped for one -
+                // unless there is no default, which is what a nullable enum left unset has.
+                // JValue holding null is not a C# null, so "?." does not short-circuit it and
+                // Value<int>() takes it to Convert.ChangeType(null, typeof(int)): an
+                // InvalidCastException thrown out of the constructor, before its try block,
+                // and straight through the registering mod's StartPre. The mod does not load.
+                JToken? declared = definition["default"];
+                bool unset = declared == null || declared.Type == JTokenType.Null;
+
                 definition.Remove("default");
-                definition.Add("default", enumNames[indexClamped]);
+
+                if (unset)
+                {
+                    // Naming a member here would invent a value the author did not choose,
+                    // and for a nullable enum "none" is the value they did.
+                    definition.Add("default", JValue.CreateNull());
+                }
+                else
+                {
+                    int indexClamped = Math.Max(enumValues.IndexOf(declared!.Value<int>()), 0);
+                    definition.Add("default", enumNames[indexClamped]);
+                }
             }
         }
 

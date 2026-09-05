@@ -634,10 +634,21 @@ public class Validation
     {
         Validation validation = new();
 
-        if (value != null && json.KeyExists("mapping"))
+        // A nullable enum left unset has no value to look up, and skipping the mapping for it
+        // cost the setting its dropdown - it fell through to the number input, where a player
+        // could not pick a member at all.
+        //
+        // Only for a nullable one. AsString returns null for any value that is not literally
+        // a string, so a definition-based setting mapped by number reaches here with a null
+        // value too, and treating that as mapped changes what it reads - the compatibility
+        // baseline caught exactly that, a definition's "tier" going from 5 to 2.
+        if (json.KeyExists("mapping") && (value != null || json["nullable"].AsBool(false)))
         {
             SetMapping(json["mapping"], validation);
-            return (value, validation.Mapping?[value], validation);
+
+            return value != null && validation.Mapping!.TryGetValue(value, out JsonObject? mapped)
+                ? (value, mapped, validation)
+                : (null, null, validation);
         }
 
         if (json.KeyExists("range"))

@@ -88,6 +88,20 @@ field are shown but not editable, `[Browsable(false)]` is off screen but still i
 saying so rather than disappearing. Compare the screen with
 `~/.cairn/packs/configkitdemo/data/ModConfig/configkitdemo.json`.
 
+**Nulls, where null is a value.** *9 Nulls* is the section that found two real bugs. It is
+WearAndTear's shape: `MaintenanceLimit` is a `float?` whose null means "no limit" while `0`
+means "nothing may be repaired" — opposite things.
+
+- It opens **empty**, not `0`. Type a number, then clear the box to put the null back.
+- *Optional toggle* is a `bool?`, so it is a three-way dropdown rather than a switch.
+- *Optional level* is a nullable enum: its dropdown carries an `(unset)` entry.
+- *Parts* is the real shape — a dictionary of classes each holding a nullable. Editing one
+  has to serialise a tree containing a null, which is what used to throw.
+- *Raw with nulls* holds an explicit `null` in raw JSON.
+
+`/ckdemonulls` prints what your object actually holds, showing null as `<null>` rather than
+as a blank — which is the only way to tell it from `0`, `""` and `false`.
+
 **Raw JSON, honestly.** *7 Awkward → Legacy data* is a `Dictionary<string, JToken>`. Its
 values have no schema by definition, so it is **not** a dictionary screen — it is the raw
 JSON control, and the registration log says so rather than pretending otherwise. It still

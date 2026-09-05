@@ -197,6 +197,61 @@ public class DemoConfig
     [Category("7 Awkward")]
     public long BigNumber = 5_000_000_000L;
 
+    // ---------------------------------------------------------------- 9. nulls
+
+    // null is a value here, not an absence, and telling the two apart is the whole point.
+    // The shape that forced this is WearAndTear's: a nullable float whose null means "no
+    // limit" while 0 means "none allowed" - opposite things. Before ConfigKit kept
+    // nullability, null was shown as 0, which stated the reverse of what the file said, and
+    // could never be typed back.
+    //
+    // Try: clear a box to put null back, and run /ckdemonulls to see what your object holds.
+
+    [Category("9 Nulls")]
+    [Description("WearAndTear's shape. Unset means no limit; 0 would mean nothing may be repaired. Starts null - clear the box to get it back.")]
+    [Range(0.0, double.PositiveInfinity)]
+    public float? MaintenanceLimit { get; set; }
+
+    [Category("9 Nulls")]
+    [Description("A closed range, which would be a slider were it not nullable. A slider has no position for unset, so this is a number input too.")]
+    [Range(0.0, 1.0)]
+    public float? OptionalRatio { get; set; } = 0.5f;
+
+    [Category("9 Nulls")]
+    [Description("A nullable int, starting null.")]
+    public int? OptionalCount { get; set; }
+
+    [Category("9 Nulls")]
+    [Description("A nullable bool has three states, so it is a dropdown rather than a switch. Left as a switch, null read as false.")]
+    public bool? OptionalToggle { get; set; }
+
+    [Category("9 Nulls")]
+    [Description("A nullable enum. Its dropdown gains an (unset) entry.")]
+    public Difficulty? OptionalLevel { get; set; }
+
+    [Category("9 Nulls")]
+    [Description("A nullable string. Null and the empty string are different, and both survive the file.")]
+    public string? OptionalNote { get; set; }
+
+    [Category("9 Nulls")]
+    [Description("A class holding a null, so the null lives inside a subtree rather than at the top.")]
+    public NullableCorner Corner { get; set; } = new();
+
+    [Category("9 Nulls")]
+    [Description("The real shape: a dictionary of classes, each with a nullable inside. Drill in - and note that editing one has to serialise a tree containing a null.")]
+    public Dictionary<string, PartLimits> Parts { get; set; } = new()
+    {
+        ["clutch"] = new PartLimits { Code = "wearandtear:clutch" },
+        ["windmill"] = new PartLimits { Code = "wearandtear:windmillsails", Limit = 0.75f },
+    };
+
+    [Category("9 Nulls")]
+    [Description("Raw JSON with an explicit null in it. This is the one that could not be turned into a game attribute tree at all: the format has no null, and writing one threw.")]
+    public Dictionary<string, JToken> RawWithNulls { get; set; } = new()
+    {
+        ["clutch"] = JToken.Parse(@"{""Code"":""wearandtear:clutch"",""MaintenanceLimit"":null,""AvgLifeSpanInYears"":3.0}"),
+    };
+
     // ---------------------------------------------------------------- 8. client side
 
     // Only these are the player's own. Everything else above is server truth, and on a
@@ -250,6 +305,31 @@ public class DoorRule
     [Description("Doors it can work. A list inside a dictionary entry.")]
     [DataType("blockcode")]
     public List<string> Doors = new();
+}
+
+public class NullableCorner
+{
+    [Description("An ordinary field, for contrast.")]
+    public bool Enabled = true;
+
+    [Description("A nullable one level down. Its null has to survive the nesting.")]
+    [Range(0.0, double.PositiveInfinity)]
+    public float? Threshold { get; set; }
+}
+
+public class PartLimits
+{
+    [Key]
+    [Description("Which part this is about.")]
+    public string Code { get; set; } = "";
+
+    [Description("Unset means no limit. This is the member the whole section exists for.")]
+    [Range(0.0, double.PositiveInfinity)]
+    public float? Limit { get; set; }
+
+    [Description("An ordinary value beside it, so a null is visibly different from a zero.")]
+    [Range(0.0, 100.0)]
+    public float AvgLifeSpanInYears { get; set; } = 3f;
 }
 
 public class LootEntry

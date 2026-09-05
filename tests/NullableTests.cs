@@ -28,6 +28,8 @@ using static VsTestkit.Testing.Vs;
 /// </summary>
 public class NullableTests
 {
+    public enum Difficulty { Gentle, Normal, Brutal }
+
     public class Limits
     {
         /// <summary>WearAndTear's shape exactly: an open lower bound and a meaningful null.</summary>
@@ -41,6 +43,16 @@ public class NullableTests
         public int? Count { get; set; }
 
         public bool? Toggle { get; set; }
+
+        /// <summary>
+        /// A nullable enum left unset. This one crashed registration outright: an enum's
+        /// numeric default is swapped for a member name, and that swap called Value&lt;int&gt;
+        /// on a JValue holding null.
+        /// </summary>
+        public Difficulty? Level { get; set; }
+
+        /// <summary>The same type with a value, which must keep working.</summary>
+        public Difficulty? SetLevel { get; set; } = Difficulty.Brutal;
 
         /// <summary>Not nullable, and must keep behaving exactly as it did.</summary>
         [Range(0d, 1d)]
@@ -196,5 +208,39 @@ public class NullableTests
         config.WriteToFile();
         Assert.True(config.ReadFromFile(), "would not read back what it wrote");
         Assert.True(((ConfigSetting)config.GetSetting("Count")!).IsNull, "null became something else on disk");
+    }
+
+    /// <summary>
+    /// A nullable enum with no value registers, rather than taking the mod down with it.
+    ///
+    /// Found by adding one to the demo pack: "Null object cannot be converted to a value
+    /// type", thrown from DefinitionFromObject - which runs before the constructor's try
+    /// block, so it escaped into the registering mod's StartPre and the whole mod failed to
+    /// load. Not a settings screen missing a row: no mod.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task ANullableEnumWithNoValueDoesNotBreakRegistration()
+    {
+        await OnServer();
+
+        Limits settings = new();
+        Config config = new(Capi, "cknull6", "Nullable", settings, "ck-null6.json");
+
+        // It registered at all, which is the thing that was broken.
+        Assert.True(config.SettingCodes.Contains("Level"), "the nullable enum is missing");
+
+        ConfigSetting level = (ConfigSetting)config.GetSetting("Level")!;
+        Assert.True(level.IsNull, "an unset enum? should be null, not its first member");
+
+        // And one with a value still resolves to that member by name.
+        ConfigSetting set = (ConfigSetting)config.GetSetting("SetLevel")!;
+        Assert.Equal("Brutal", set.Value.Token?.ToString());
+
+        // Both reach the object.
+        Limits loaded = new() { Level = Difficulty.Gentle, SetLevel = Difficulty.Gentle };
+        config.AssignSettingsValues(loaded);
+
+        Assert.Null(loaded.Level);
+        Assert.Equal(Difficulty.Brutal, loaded.SetLevel);
     }
 }
