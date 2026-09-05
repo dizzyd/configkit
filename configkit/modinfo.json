@@ -6,7 +6,7 @@
         "Dave (Dizzy) Smith"
     ],
     "description": "Mod configuration that most mods get for free. ConfigKit intercepts the config a mod already loads and gives it an in-game settings screen, with no code change, no library reference and no ImGui.",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "dependencies": {
         "game": "1.22.0"
     },
