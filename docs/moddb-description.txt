@@ -15,9 +15,12 @@ FOR PLAYERS
   - Press P, or use the Mod settings button in the pause menu.
   - Settings the server controls are shown read-only unless you have controlserver.
   - Edit a file in ModConfig/ while the game is running and it reloads on the spot.
+  - Type in the filter box beside the mod dropdown to find a setting by name, wherever it lives.
   - Don't install ConfigKit and configlib together. If ConfigKit sees configlib
 or autoconfiglib it stands down and says so in the log, so nothing breaks, but only one of
-them can manage your configs.
+them can manage your configs. Config managers that only handle some mods are a different
+matter: name a mod under UnmanagedDomains in ModConfig/configkit.json and ConfigKit leaves
+that one alone without switching itself off.
   - You can join a server that doesn't have it, and you keep your own settings screen for
 client-side mods.
   - A server running it needs its players to have it too. Anyone without it is turned away on
@@ -51,6 +54,12 @@ messages you wrote - including your own ValidationAttribute - and a nullable val
 keeps its null instead of showing it as zero.
 
 Guides:
+structured config (https://github.com/dizzyd/configkit/blob/main/docs/STRUCTURED-CONFIG.md)
+What each shape becomes on screen, with screenshots.
+·
+integrating (https://github.com/dizzyd/configkit/blob/main/docs/INTEGRATING.md)
+The API, and when your values are there.
+·
 migrating from configlib (https://github.com/dizzyd/configkit/blob/main/docs/MIGRATING.md)
 ·
 the config file format (https://github.com/dizzyd/configkit/blob/main/docs/CONFIG-FORMAT.md)

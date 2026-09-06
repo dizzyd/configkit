@@ -104,6 +104,16 @@ public class ShotsTest
         public RainCollector RainCollector = new();
     }
 
+    /// <summary>
+    /// Where a documentation shot lands.
+    ///
+    /// Shot.Take copies to the path it is handed, verbatim and relative to the game's own
+    /// working directory - so a bare "ck-1-sections" wrote an extensionless file into the
+    /// game install, where nothing looking for a png would ever find it.
+    /// </summary>
+    private static string ShotPath(string name)
+        => Path.Combine(Capi.DataBasePath, "shots", name + ".png");
+
     [VsTest(TimeoutMs = 120000)]
     [RequiresClient]
     public async Task TakeDocumentationShots()
@@ -130,26 +140,26 @@ public class ShotsTest
 
         dialog.ToggleSectionNamed("Doors");
         await Frames.Wait(12);
-        await Shot.Take("ck-1-sections");
+        await Shot.Take(ShotPath("ck-1-sections"));
 
         dialog.SetFilter("door");
         await Frames.Wait(12);
-        await Shot.Take("ck-7-filter");
+        await Shot.Take(ShotPath("ck-2-filter"));
         dialog.SetFilter("");
         await Frames.Wait(12);
 
         dialog.OpenSetting("AutoCloseDelays");
         await Frames.Wait(12);
-        await Shot.Take("ck-2-codes");
+        await Shot.Take(ShotPath("ck-3-codes"));
 
         dialog.Back();
         dialog.OpenSetting("CreaturesOpenDoors");
         await Frames.Wait(12);
-        await Shot.Take("ck-3-dictionary");
+        await Shot.Take(ShotPath("ck-4-dictionary"));
 
         dialog.OpenEntry("game:wolf-*");
         await Frames.Wait(12);
-        await Shot.Take("ck-4-entry");
+        await Shot.Take(ShotPath("ck-5-entry"));
 
         dialog.Back();
         dialog.Back();
@@ -157,13 +167,13 @@ public class ShotsTest
         await Frames.Wait(12);
         dialog.OpenEntry("copper");
         await Frames.Wait(12);
-        await Shot.Take("ck-5-nested");
+        await Shot.Take(ShotPath("ck-6-nested"));
 
         dialog.Back();
         dialog.Back();
         dialog.ToggleSectionNamed("Rain collector");
         await Frames.Wait(12);
-        await Shot.Take("ck-6-nested-object");
+        await Shot.Take(ShotPath("ck-7-nested-object"));
 
         dialog.TryClose();
     }

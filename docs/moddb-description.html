@@ -16,9 +16,14 @@ resolves identically to configlib's output.</em></p>
 <li>Press <strong>P</strong>, or use the <strong>Mod settings</strong> button in the pause menu.</li>
 <li>Settings the server controls are shown read-only unless you have <code>controlserver</code>.</li>
 <li>Edit a file in <code>ModConfig/</code> while the game is running and it reloads on the spot.</li>
+<li>Type in the filter box beside the mod dropdown to find a setting by name, wherever it
+lives.</li>
 <li><strong>Don't install ConfigKit and configlib together.</strong> If ConfigKit sees configlib
 or autoconfiglib it stands down and says so in the log, so nothing breaks, but only one of
-them can manage your configs.</li>
+them can manage your configs. Config managers that only handle <em>some</em> mods are a
+different matter: name a mod under <code>UnmanagedDomains</code> in
+<code>ModConfig/configkit.json</code> and ConfigKit leaves that one alone without switching
+itself off.</li>
 <li>You can join a server that doesn't have it, and you keep your own settings screen for
 client-side mods.</li>
 <li>A server running it needs its players to have it too. Anyone without it is turned away on
@@ -55,10 +60,16 @@ enforced with the messages you wrote &mdash; including your own <code>Validation
 &mdash; and a nullable value type keeps its null instead of showing it as zero.</p>
 
 <p><strong>Guides:</strong>
+<a href="https://github.com/dizzyd/configkit/blob/main/docs/STRUCTURED-CONFIG.md">structured config</a>
+&mdash; what each shape becomes on screen, with screenshots
+&middot;
+<a href="https://github.com/dizzyd/configkit/blob/main/docs/INTEGRATING.md">integrating</a>
+&mdash; the API, and when your values are there
+&middot;
 <a href="https://github.com/dizzyd/configkit/blob/main/docs/MIGRATING.md">migrating from configlib</a>
 &middot;
 <a href="https://github.com/dizzyd/configkit/blob/main/docs/CONFIG-FORMAT.md">the config file format</a>
-Settings, patches, JSON paths and expressions, for a mod with no C# at all.</p>
+&mdash; settings, patches, JSON paths and expressions, for a mod with no C# at all.</p>
 
 <h3>Verifying what you downloaded</h3>
 
