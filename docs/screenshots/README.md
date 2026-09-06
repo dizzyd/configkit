@@ -10,10 +10,26 @@ bash scripts/vstk eval --side client "ConfigKit.Gui.ConfigGui.Show()"
 bash scripts/vstk shot -o shot.png
 ```
 
-The mod shown is whichever comes first alphabetically by display name; drop that mod
-from the mods directory to photograph the next one.
+The mod shown used to be whichever came first alphabetically, so photographing a
+particular one meant dropping the others out of the mods directory. Scope a dialog to
+one domain instead:
 
-**Fornax must be 1.6.0 or newer.** It hands its config over by reflection against
+```bash
+bash scripts/vstk eval --side client '
+var ck = capi.ModLoader.GetModSystem<ConfigKit.ConfigKitModSystem>();
+var cfg = ck.GetConfig("fornax") as ConfigKit.Config;
+new ConfigKit.Gui.ConfigDialog(capi, new Dictionary<string, ConfigKit.Config> { ["fornax"] = cfg }).TryOpen();
+return "ok";'
+```
+
+The `ck-*.png` set is different: those come from `tests/ShotsTest.cs`, which builds its own
+scenes and writes into `<dataPath>/shots/`.
+
+```bash
+VSTK_SHOTS=1 bash scripts/run.sh <tests> --mod <configkit> --client --filter TakeDocumentationShots
+```
+
+**Fornax must be 1.6.0 or newer** (cairn pulls 1.7.0 into the demo pack). It hands its config over by reflection against
 `ConfigKit.ConfigKitModSystem`, and only 1.6.0 onwards does — 1.5.x still looks for
 configlib, so it loads fine and contributes no settings at all, and the window says "No
 mods here have settings ConfigKit can edit". Take the zip from ModDB rather than from a
