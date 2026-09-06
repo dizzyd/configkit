@@ -284,7 +284,7 @@ Common answers:
 | one mod has no settings screen | it is listed in `ModConfig/configkit.json` under `UnmanagedDomains` |
 | one field missing, no log line | it is `[JsonIgnore]`, or `[Browsable(false)]` — the latter is still in the file |
 | a field shows as raw JSON | nothing can edit that type; it still round-trips |
-| an edit does not reach your object | it failed a validation attribute — the message is at the bottom of the window, and in `config.Errors` |
+| an edit does not reach your object | it failed a validation attribute — the row is marked, the message is at the bottom of the window, and in `config.Errors`; for a container it names the entry |
 | a number shows a text box, not a slider | its range has an open bound, or it is nullable — neither has a slider position |
 | a setting has no tooltip | no `[Description]`, and no `.xml` doc file shipped beside the dll |
 | a field says *not editable* | nothing can construct it — an interface, an abstract class, or a cycle |

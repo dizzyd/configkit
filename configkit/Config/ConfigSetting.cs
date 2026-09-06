@@ -170,6 +170,42 @@ public class ConfigSetting : ISetting
     };
 
     internal void Changed() => Debug.Write("");// SettingChanged?.Invoke(this);
+
+    /// <summary>
+    /// Takes a value as it sits in a container's subtree. An enum there may be its member's
+    /// name - which is what this library writes - or its number, which is what Newtonsoft
+    /// writes for the author's own object; both land on the right member of the mapping. A
+    /// name the mapping does not know is kept as it is, so a stale entry is shown rather
+    /// than silently replaced with the first member.
+    /// </summary>
+    internal void LoadFrom(JsonObject value)
+    {
+        if (Validation?.Mapping is { } mapping)
+        {
+            string? name = value.Token?.Type == JTokenType.String ? value.AsString() : null;
+            if (name != null && mapping.ContainsKey(name))
+            {
+                MappingKey = name;
+                return;
+            }
+
+            if (value.Token?.Type == JTokenType.Integer)
+            {
+                int number = value.AsInt();
+                string? byNumber = mapping.FirstOrDefault(entry => entry.Value.Token?.Type == JTokenType.Integer
+                                                                  && entry.Value.AsInt() == number).Key;
+                if (byNumber != null)
+                {
+                    MappingKey = byNumber;
+                    return;
+                }
+            }
+
+            _mappingKey = null;
+        }
+
+        Value = value;
+    }
     internal void SetValueFrom(ConfigSetting value)
     {
         Value = value._value.Clone();

@@ -70,6 +70,29 @@ public class ConfigDialog : GuiDialog
     /// control for the setting, it only reports it.
     private readonly Dictionary<string, GuiElementDynamicText> _sliderValues = new();
 
+    /// <summary>
+    /// What a row shows when its value is refused: its label turned red, a mark after Reset,
+    /// and the message as that mark's tooltip. Updated in place on every edit rather than by
+    /// recomposing, which would take the focus off the box being typed into.
+    /// </summary>
+    private sealed class ErrorMark
+    {
+        public required GuiElementDynamicText Label;
+        public required CairoFont LabelFont;
+        public required GuiElementDynamicText Mark;
+        public required GuiElementHoverText Hover;
+        /// <summary>The message currently drawn, so an unchanged one costs no redraw.</summary>
+        public string? Shown;
+    }
+
+    private readonly Dictionary<string, ErrorMark> _errorMarks = new();
+
+    /// The control editing each entry's key on a collection screen, by the entry's label.
+    private readonly Dictionary<string, GuiElement> _keyWidgets = new();
+
+    /// The button that removes each entry on a collection screen, by the entry's label.
+    private readonly Dictionary<string, GuiElement> _deleteButtons = new();
+
     private const double KeyWidth = 250;
     private const double EntryValueWidth = 240;
     private const double DeleteWidth = 28;
@@ -190,6 +213,22 @@ public class ConfigDialog : GuiDialog
         };
 
         SingleComposer?.GetDynamicText("errors")?.SetNewText(ErrorText);
+
+        // The row itself says so too. A message at the foot of the window is a long way
+        // from the box that caused it, and a folded or scrolled-away row would otherwise
+        // give no sign at all.
+        foreach ((string key, ErrorMark mark) in _errorMarks)
+        {
+            string? error = _settingsByKey.TryGetValue(key, out ConfigSetting? setting) ? setting.Error : null;
+            if (error == mark.Shown) continue;
+
+            mark.Shown = error;
+            mark.Mark.SetNewText(error == null ? "" : "!");
+            mark.Hover.SetNewText(error ?? "");
+            mark.Hover.SetAutoDisplay(error != null);
+            mark.Label.Font = error == null ? mark.LabelFont : mark.LabelFont.Clone().WithColor(GuiStyle.ErrorTextColor);
+            mark.Label.RecomposeText();
+        }
     }
 
     private static string LabelForCode(Config config, string code)
@@ -274,6 +313,47 @@ public class ConfigDialog : GuiDialog
     /// range alone cannot see it.
     /// </summary>
     public string ControlKindFor(string yamlCode) => WidgetFor(yamlCode)?.GetType().Name ?? "";
+
+    /// <summary>
+    /// The message a rendered row is showing against its value, or null when it has none.
+    /// On an entry's screen the code is the field's own name.
+    /// </summary>
+    public string? RowErrorFor(string yamlCode) => SettingFor(yamlCode)?.Error;
+
+    /// <summary>Takes the focus off a setting's control, as clicking anywhere else does.</summary>
+    public bool Blur(string yamlCode)
+    {
+        if (WidgetFor(yamlCode) is not GuiElement widget) return false;
+
+        widget.OnFocusLost();
+        return true;
+    }
+
+    /// <summary>What a setting's dropdown has selected, or "" when it is not a dropdown.</summary>
+    public string DropdownValueFor(string yamlCode)
+        => WidgetFor(yamlCode) is GuiElementDropDown dropdown ? dropdown.SelectedValue : "";
+
+    /// <summary>
+    /// The class name of the control editing an entry's key on a collection screen, by the
+    /// entry's label. A dictionary keyed by an enum offers its members; anything else is typed.
+    /// </summary>
+    public string KeyControlKindFor(string label)
+        => _keyWidgets.TryGetValue(label, out GuiElement? widget) ? widget.GetType().Name : "";
+
+    /// <summary>
+    /// Where an entry's remove button sits on screen, for a test that wants to click it
+    /// through the mouse rather than call its handler. Null when there is no such button.
+    /// </summary>
+    public (double X, double Y, double Width, double Height)? RemoveButtonRectFor(string label)
+    {
+        if (!_deleteButtons.TryGetValue(label, out GuiElement? button)) return null;
+
+        ElementBounds bounds = button.Bounds;
+        return (bounds.absX, bounds.absY, bounds.OuterWidth, bounds.OuterHeight);
+    }
+
+    private ConfigSetting? SettingFor(string yamlCode)
+        => _settingsByKey.Values.FirstOrDefault(setting => setting.YamlCode == yamlCode);
 
     /// <summary>
     /// Restores one rendered setting to its default, exactly as that row's Reset button
@@ -470,7 +550,7 @@ public class ConfigDialog : GuiDialog
     {
         if (_stack.Count == 0 || _stack[^1].Node.Kind == SchemaKind.Object) return false;
 
-        bool renamed = Subtree.Rename(_stack[^1].Setting, _stack[^1].Path, from, to);
+        bool renamed = TryRename(_stack[^1], from, to, out _);
         Recompose();
         return renamed;
     }
@@ -490,6 +570,18 @@ public class ConfigDialog : GuiDialog
 
     /// <summary>Folds or unfolds a section by its caption, as clicking its heading does.</summary>
     public bool ToggleSectionNamed(string title) => ToggleSection(SectionKey(title));
+
+    /// <summary>Shows another mod's settings, as picking it from the dropdown does.</summary>
+    public bool ShowDomain(string domain)
+    {
+        if (!_configs.ContainsKey(domain)) return false;
+
+        OnDomainSelected(domain, true);
+        return true;
+    }
+
+    /// <summary>The mod currently shown, by domain.</summary>
+    public string Domain => _domain;
 
     public override void OnGuiOpened()
     {
@@ -681,7 +773,7 @@ public class ConfigDialog : GuiDialog
         double y = 4;
         int index = 0;
 
-        if (container != null) { _widgets.Clear(); _sliderValues.Clear(); }
+        if (container != null) ClearRowState();
 
         // Pair every block with the heading it sits under, so a filter can decide what to
         // show before anything is drawn - a heading is only worth drawing if something under
@@ -781,62 +873,34 @@ public class ConfigDialog : GuiDialog
             // says the server owns it, the other that nothing owns it.
             bool serverOwned = IsServerControlled(setting);
             bool locked = serverOwned || setting.ReadOnly;
-            SchemaNode? node = setting.Node;
-            bool container_ = isContainer;
-
-            if (!locked && !container_) _settingsByKey[key] = setting;
-            if (container_) _settingsByKey[key] = setting;
-
-            // Raw JSON is a document, not a value: it gets the label's own line and then the
-            // full width of the row beneath it. In the control column it had 250px, which is
-            // the width of a slider and no use at all for reading JSON.
-            bool document = !container_ && setting.SettingType == ConfigSettingType.Other;
-
-            ElementBounds controlBounds = document
-                ? ElementBounds.Fixed(0, y + RowHeight, RowWidth, rowHeight - RowHeight - 4)
-                : ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, rowHeight - 4);
-
             string labelText = serverOwned ? LabelFor(setting) + " (server)" : LabelFor(setting);
-            CairoFont labelFont = locked
-                ? CairoFont.WhiteSmallText().WithColor(GuiStyle.ColorParchment)
-                : CairoFont.WhiteSmallText();
 
-            // A document row's label heads its box rather than sitting beside a control, so
-            // its baseline comes from one line's worth rather than the whole tall row.
-            double baseline = Baseline(labelFont, y, document ? RowHeight : controlBounds.fixedHeight);
-            ElementBounds labelBounds = OnBaseline(labelText, labelFont, baseline,
-                LabelIndent, LabelWidth - LabelIndent);
-
-            container.Add(new GuiElementDynamicText(capi, labelText, labelFont, labelBounds));
-
-            if (!string.IsNullOrEmpty(setting.Comment))
-            {
-                container.Add(new GuiElementHoverText(capi, setting.Comment,
-                    CairoFont.WhiteDetailText(), 320, labelBounds.FlatCopy()));
-            }
-
-            if (container_)
+            if (isContainer)
             {
                 // One row, whatever is inside it. A dictionary's contents are unbounded and
                 // its entries need a different set of columns than a setting row has.
+                _settingsByKey[key] = setting;
+
+                ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, rowHeight - 4);
+                AddLabel(container, labelText, setting.Comment, y, controlBounds.fixedHeight, locked);
+
                 ConfigSetting owner = setting;
-                SchemaNode owned = node!;
+                SchemaNode owned = setting.Node!;
                 container.Add(new GuiElementTextButton(capi, EntryCountText(setting) + "  >",
                     CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
                     () => OpenContainer(owner, owned, LabelFor(setting), locked),
                     controlBounds, EnumButtonStyle.Small));
 
-                if (!locked) AddResetButton(container, setting, y, key);
-            }
-            else if (locked)
-            {
-                container.Add(new GuiElementDynamicText(capi, ValueText(setting),
-                    CairoFont.WhiteDetailText(), controlBounds));
+                if (!locked)
+                {
+                    AddResetButton(container, y, () => OnResetSetting(setting, key),
+                        $"Restore this setting to {DefaultText(setting)}");
+                }
             }
             else
             {
-                AddControl(container, setting, controlBounds, key);
-                AddResetButton(container, setting, y, key);
+                AddSettingRow(container, key, setting, labelText, setting.Comment, y, rowHeight, locked,
+                    () => OnResetSetting(setting, key), $"Restore this setting to {DefaultText(setting)}");
             }
 
             y += rowHeight + RowGap;
@@ -1012,6 +1076,17 @@ public class ConfigDialog : GuiDialog
         => setting.Nullable && choice == NullChoice;
 
     /// <summary>
+    /// Puts a nullable setting back to null - the mapping key included. A mapped setting is
+    /// written and assigned through its key, so nulling the value alone left the old member
+    /// in the file and on the object while the dropdown read "(unset)".
+    /// </summary>
+    private static void Unset(ConfigSetting setting)
+    {
+        setting.MappingKey = null;
+        setting.Value = FromNull();
+    }
+
+    /// <summary>
     /// The same number as the author would write it: NumberText, then any [DisplayFormat] on
     /// top. A ratio declared with "P" reads 95% rather than 0.95, which is how the setting is
     /// described everywhere except in the file.
@@ -1067,7 +1142,7 @@ public class ConfigDialog : GuiDialog
                 (code, on) =>
                 {
                     if (!on) return;
-                    if (IsBlank(setting, code)) setting.Value = FromNull();
+                    if (IsBlank(setting, code)) Unset(setting);
                     else setting.MappingKey = code;
                 },
                 bounds, CairoFont.WhiteDetailText(), false));
@@ -1085,7 +1160,7 @@ public class ConfigDialog : GuiDialog
                 (code, on) =>
                 {
                     if (!on) return;
-                    if (IsBlank(setting, code)) setting.Value = FromNull();
+                    if (IsBlank(setting, code)) Unset(setting);
                     else SetFromText(setting, code);
                 },
                 bounds, CairoFont.WhiteDetailText(), false));
@@ -1119,6 +1194,14 @@ public class ConfigDialog : GuiDialog
                 AddSliderControl(container, setting, bounds, key);
                 break;
 
+            // The stock input puts a 0 into an empty box when it loses focus, which for a
+            // nullable number undoes the one edit that means "unset".
+            case ConfigSettingType.Integer when setting.Nullable:
+            case ConfigSettingType.Float when setting.Nullable:
+                Remember(key, container, new NullableNumberInput(capi, bounds,
+                    text => OnNumberTyped(setting, text), CairoFont.WhiteDetailText()));
+                break;
+
             case ConfigSettingType.Integer:
             case ConfigSettingType.Float:
                 Remember(key, container, new GuiElementNumberInput(capi, bounds,
@@ -1146,6 +1229,88 @@ public class ConfigDialog : GuiDialog
                     text => setting.Value = FromString(text), CairoFont.WhiteDetailText()));
                 break;
         }
+    }
+
+    /// <summary>
+    /// One setting's row: its label and comment, its control - or its value, when it cannot
+    /// be edited - the mark that says the value is refused, and Reset.
+    ///
+    /// The root screen and an entry's screen both draw their rows through here. That is what
+    /// gives a field three levels down the same slider, dropdown, range check and null
+    /// handling as one at the top; the entry screens used to build their own controls and
+    /// had none of them.
+    /// </summary>
+    private void AddSettingRow(GuiElementContainer container, string key, ConfigSetting setting, string labelText,
+        string? comment, double y, double rowHeight, bool locked, Action? onReset, string? resetHint)
+    {
+        // Raw JSON is a document, not a value: it gets the label's own line and then the
+        // full width of the row beneath it. In the control column it had 250px, which is
+        // the width of a slider and no use at all for reading JSON.
+        bool document = setting.SettingType == ConfigSettingType.Other;
+
+        ElementBounds controlBounds = document
+            ? ElementBounds.Fixed(0, y + RowHeight, RowWidth, rowHeight - RowHeight - 4)
+            : ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, rowHeight - 4);
+
+        // A document row's label heads its box rather than sitting beside a control, so
+        // its baseline comes from one line's worth rather than the whole tall row.
+        (GuiElementDynamicText label, CairoFont labelFont) = AddLabel(container, labelText, comment, y,
+            document ? RowHeight : controlBounds.fixedHeight, locked);
+
+        if (locked)
+        {
+            container.Add(new GuiElementDynamicText(capi, ValueText(setting),
+                CairoFont.WhiteDetailText(), controlBounds));
+            return;
+        }
+
+        _settingsByKey[key] = setting;
+        AddControl(container, setting, controlBounds, key);
+        AddErrorMark(container, key, setting, label, labelFont, y);
+
+        if (onReset != null) AddResetButton(container, y, onReset, resetHint ?? "Restore this to its default");
+    }
+
+    /// <summary>A row's label on the row's baseline, with its comment as a tooltip.</summary>
+    private (GuiElementDynamicText label, CairoFont font) AddLabel(GuiElementContainer container, string text,
+        string? comment, double y, double controlHeight, bool locked)
+    {
+        CairoFont font = locked
+            ? CairoFont.WhiteSmallText().WithColor(GuiStyle.ColorParchment)
+            : CairoFont.WhiteSmallText();
+
+        ElementBounds bounds = OnBaseline(text, font, Baseline(font, y, controlHeight),
+            LabelIndent, LabelWidth - LabelIndent);
+
+        GuiElementDynamicText label = new(capi, text, font, bounds);
+        container.Add(label);
+
+        if (!string.IsNullOrEmpty(comment))
+        {
+            container.Add(new GuiElementHoverText(capi, comment, CairoFont.WhiteDetailText(), 320, bounds.FlatCopy()));
+        }
+
+        return (label, font);
+    }
+
+    /// <summary>
+    /// The mark a row shows when its value is refused, built empty and filled in by
+    /// ShowErrors. Sits past Reset, in the margin the code mark uses on the entry screens.
+    /// </summary>
+    private void AddErrorMark(GuiElementContainer container, string key, ConfigSetting setting,
+        GuiElementDynamicText label, CairoFont labelFont, double y)
+    {
+        ElementBounds bounds = ElementBounds.Fixed(RowWidth + 4, y + 2, MarkWidth, RowHeight - 4);
+
+        GuiElementDynamicText mark = new(capi, "",
+            CairoFont.WhiteSmallText().WithWeight(Cairo.FontWeight.Bold).WithColor(GuiStyle.ErrorTextColor), bounds);
+        GuiElementHoverText hover = new(capi, "", CairoFont.WhiteDetailText(), 300, bounds.FlatCopy());
+        hover.SetAutoDisplay(false);
+
+        container.Add(mark);
+        container.Add(hover);
+
+        _errorMarks[key] = new ErrorMark { Label = label, LabelFont = labelFont, Mark = mark, Hover = hover };
     }
 
     /// <summary>
@@ -1249,7 +1414,7 @@ public class ConfigDialog : GuiDialog
     /// only its own row, and only in memory: like every other edit here, it takes Save to
     /// reach the file.
     /// </summary>
-    private void AddResetButton(GuiElementContainer container, ConfigSetting setting, double y, string key)
+    private void AddResetButton(GuiElementContainer container, double y, Action onReset, string hint)
     {
         // Placed from the column constants rather than from the control's own bounds: a
         // switch resizes the bounds it is given down to its own square, which would drag
@@ -1261,12 +1426,10 @@ public class ConfigDialog : GuiDialog
         container.Add(new GuiElementTextButton(capi, "Reset",
             CairoFont.WhiteDetailText(),
             CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
-            () => OnResetSetting(setting, key),
+            () => { onReset(); return true; },
             bounds, EnumButtonStyle.Small));
 
-        container.Add(new GuiElementHoverText(capi,
-            $"Restore this setting to {DefaultText(setting)}",
-            CairoFont.WhiteDetailText(), 260, bounds.FlatCopy()));
+        container.Add(new GuiElementHoverText(capi, hint, CairoFont.WhiteDetailText(), 260, bounds.FlatCopy()));
     }
 
     private bool OnResetSetting(ConfigSetting setting, string key)
@@ -1294,6 +1457,13 @@ public class ConfigDialog : GuiDialog
             // The stored default is not one of the keys - a definition that changed under a
             // saved config, or a default written as the mapped value. Setting it directly is
             // still better than leaving the player's edit in place.
+
+            // A nullable enum whose default is "unset" has no key to go back to, and a key
+            // left behind would be what gets written.
+            if (setting.DefaultValue.Token == null || setting.DefaultValue.Token.Type == JTokenType.Null)
+            {
+                setting.MappingKey = null;
+            }
         }
 
         setting.Value = setting.DefaultValue.Clone();
@@ -1357,43 +1527,12 @@ public class ConfigDialog : GuiDialog
         ElementBounds swatchBounds = ElementBounds.Fixed(
             bounds.fixedX + bounds.fixedWidth - swatchSize, bounds.fixedY, swatchSize, swatchSize);
 
-        GuiElementCustomDraw swatch = new(capi, swatchBounds,
-            (ctx, surface, currentBounds) => DrawSwatch(ctx, currentBounds, setting.Value.AsString("#000000")));
+        ColorSwatch swatch = new(capi, swatchBounds, () => setting.Value.AsString("#000000"));
 
         Remember(key, container, new GuiElementTextInput(capi, fieldBounds,
             text => { setting.Value = FromString(text); swatch.Redraw(); }, CairoFont.WhiteDetailText()));
 
         container.Add(swatch);
-    }
-
-    private static void DrawSwatch(Cairo.Context ctx, ElementBounds bounds, string hex)
-    {
-        double x = 0, y = 0, w = bounds.InnerWidth, h = bounds.InnerHeight;
-
-        if (TryParseHex(hex, out double r, out double g, out double b))
-        {
-            ctx.SetSourceRGB(r, g, b);
-            ctx.Rectangle(x, y, w, h);
-            ctx.Fill();
-        }
-        else
-        {
-            // Unparseable: a flat dark box with a stroke through it, so it reads as "not a
-            // colour" rather than as black.
-            ctx.SetSourceRGB(0.12, 0.12, 0.12);
-            ctx.Rectangle(x, y, w, h);
-            ctx.Fill();
-            ctx.SetSourceRGB(0.75, 0.3, 0.3);
-            ctx.LineWidth = 2;
-            ctx.MoveTo(x + 3, y + 3);
-            ctx.LineTo(x + w - 3, y + h - 3);
-            ctx.Stroke();
-        }
-
-        ctx.SetSourceRGB(0, 0, 0);
-        ctx.LineWidth = 1;
-        ctx.Rectangle(x + 0.5, y + 0.5, w - 1, h - 1);
-        ctx.Stroke();
     }
 
     /// <summary>Parses "#rrggbb" or "#aarrggbb", with or without the hash.</summary>
@@ -1752,7 +1891,7 @@ public class ConfigDialog : GuiDialog
         double y = 4;
         int index = 0;
 
-        if (container != null) { _widgets.Clear(); _sliderValues.Clear(); }
+        if (container != null) ClearRowState();
 
         JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
 
@@ -1768,42 +1907,109 @@ public class ConfigDialog : GuiDialog
             string label = child.Label ?? SchemaBuilder.Humanize(child.Code);
             if (_filter.Length > 0 && !label.Contains(_filter, StringComparison.OrdinalIgnoreCase)) continue;
 
+            // A field the file does not have yet - added to the class after the file was
+            // written - reads as the class's own initialiser, which is what deserialising
+            // the entry gives the mod. A blank zero would show a value the mod never sees.
+            JToken value = (token is JObject holder ? holder[child.Code] : null)
+                ?? defaults?[child.Code]
+                ?? KeyGenerator.BlankValue(child);
+
+            bool opens = child.Kind is SchemaKind.Object or SchemaKind.Dictionary or SchemaKind.List;
+
+            // A field is a setting like any on the root screen, built from the same
+            // definition its member would have had there - so it is measured and drawn
+            // the same way, tall raw-JSON rows included.
+            ConfigSetting? setting = opens ? null : EntrySetting(frame, child.Code, value, child, child.Code);
+            double rowHeight = setting == null ? RowHeight : ControlHeight(setting);
+
             if (container == null)
             {
-                y += RowHeight + RowGap;
+                y += rowHeight + RowGap;
                 index++;
                 continue;
             }
 
             string key = $"field-{index++}";
 
-            ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
-            ElementBounds labelBounds = OnBaseline(label, CairoFont.WhiteSmallText(),
-                Baseline(CairoFont.WhiteSmallText(), y, controlBounds.fixedHeight),
-                LabelIndent, LabelWidth - LabelIndent);
+            JToken? fieldDefault = frame.Locked ? null : defaults?[child.Code];
+            string code = child.Code;
+            Action? reset = fieldDefault == null ? null : () => OnResetField(frame, code, fieldDefault);
+            string? hint = fieldDefault == null
+                ? null
+                : $"Restore this to {fieldDefault.ToString(Newtonsoft.Json.Formatting.None)}";
 
-            container.Add(new GuiElementDynamicText(capi, label, CairoFont.WhiteSmallText(), labelBounds));
-
-            if (!string.IsNullOrEmpty(child.Comment))
+            if (setting == null)
             {
-                container.Add(new GuiElementHoverText(capi, child.Comment,
-                    CairoFont.WhiteDetailText(), 320, labelBounds.FlatCopy()));
+                ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
+                AddLabel(container, label, child.Comment, y, controlBounds.fixedHeight, locked: false);
+                AddNestedButton(container, frame, child.Code, label, value, child, controlBounds);
+
+                if (reset != null) AddResetButton(container, y, reset, hint!);
+            }
+            else
+            {
+                AddSettingRow(container, key, setting, label, child.Comment, y, rowHeight, frame.Locked, reset, hint);
             }
 
-            JToken value = (token is JObject holder ? holder[child.Code] : null)
-                ?? KeyGenerator.BlankValue(child);
-
-            AddEntryValue(container, frame, child.Code, label, value, child, controlBounds, key);
-
-            if (!frame.Locked && defaults?[child.Code] is JToken fieldDefault)
-            {
-                AddFieldResetButton(container, frame, child.Code, fieldDefault, y);
-            }
-
-            y += RowHeight + RowGap;
+            y += rowHeight + RowGap;
         }
 
         return y + 6;
+    }
+
+    /// <summary>Forgets every widget of the screen being replaced.</summary>
+    private void ClearRowState()
+    {
+        _widgets.Clear();
+        _sliderValues.Clear();
+        _errorMarks.Clear();
+        _keyWidgets.Clear();
+        _deleteButtons.Clear();
+    }
+
+    /// <summary>
+    /// A setting standing in for one value inside a container: a field of an entry, or one
+    /// element of a collection. It carries a copy of the value, and every change to it is
+    /// written back into the container's subtree, which is the setting that persists.
+    ///
+    /// Building a real setting rather than a bespoke control is what gives an entry the
+    /// root screen's whole repertoire - the slider for a [Range], the dropdown for an enum,
+    /// the empty box for a null - and its validation. Reported by TheInsanityGod as "no
+    /// sliders in the sub config" and "validation doesn't go over nested entries", which
+    /// were both the same missing thing.
+    /// </summary>
+    private ConfigSetting EntrySetting(ContainerFrame frame, object step, JToken value, SchemaNode schema, string code)
+    {
+        ConfigSetting setting = Config.SettingFor(schema, _domain, capi);
+        setting.YamlCode = code;
+        setting.LoadFrom(new JsonObject(value.DeepClone()));
+        setting.Error = EntryError(frame, setting, schema);
+
+        setting.SettingChanged += changed =>
+        {
+            Subtree.SetValue(frame.Setting, frame.Path, step,
+                Config.StoredForm(changed, changed.Value).Token?.DeepClone() ?? JValue.CreateNull());
+
+            // After the write, so a validator reading its siblings sees the entry as it now
+            // is; and then said out loud, because the container's own change has already
+            // been announced by the time this row knows what it thinks.
+            changed.Error = EntryError(frame, changed, schema);
+            ShowErrors();
+        };
+
+        return setting;
+    }
+
+    /// <summary>
+    /// What a field of an entry says against its own attributes. A collection's elements
+    /// have a shape but no member, and so no attributes to check.
+    /// </summary>
+    private string? EntryError(ContainerFrame frame, ConfigSetting setting, SchemaNode schema)
+    {
+        if (frame.Node.Kind != SchemaKind.Object) return null;
+
+        object owner = Validate.OwnerFor(Subtree.Navigate(frame.Setting.Value.Token, frame.Path), frame.Node.MemberType);
+        return Validate.Check(setting, schema, owner);
     }
 
     private static JObject? Defaults(Type type)
@@ -1821,26 +2027,6 @@ public class ConfigDialog : GuiDialog
         }
     }
 
-    /// <summary>
-    /// Puts one field of an object entry back to the value its class declares, in the same
-    /// column the root screen's Reset sits in.
-    /// </summary>
-    private void AddFieldResetButton(GuiElementContainer container, ContainerFrame frame, string field, JToken value, double y)
-    {
-        ElementBounds bounds = ElementBounds.Fixed(
-            LabelWidth + 16 + ControlWidth + ResetGap, y, ResetWidth, RowHeight - 4);
-
-        container.Add(new GuiElementTextButton(capi, "Reset",
-            CairoFont.WhiteDetailText(),
-            CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
-            () => OnResetField(frame, field, value),
-            bounds, EnumButtonStyle.Small));
-
-        container.Add(new GuiElementHoverText(capi,
-            $"Restore this to {value.ToString(Newtonsoft.Json.Formatting.None)}",
-            CairoFont.WhiteDetailText(), 260, bounds.FlatCopy()));
-    }
-
     private bool OnResetField(ContainerFrame frame, string field, JToken value)
     {
         Subtree.SetValue(frame.Setting, frame.Path, field, value.DeepClone());
@@ -1853,7 +2039,7 @@ public class ConfigDialog : GuiDialog
         double y = 4;
         int index = 0;
 
-        if (container != null) { _widgets.Clear(); _sliderValues.Clear(); }
+        if (container != null) ClearRowState();
 
         JToken? token = Subtree.Navigate(frame.Setting.Value.Token, frame.Path);
         SchemaNode? valueSchema = frame.Node.Kind == SchemaKind.Dictionary ? frame.Node.ValueNode : frame.Node.ElementNode;
@@ -1887,10 +2073,13 @@ public class ConfigDialog : GuiDialog
             if (!frame.Locked)
             {
                 object removed = step;
-                container.Add(new GuiElementTextButton(capi, "x",
+                GuiElementTextButton remove = new(capi, "x",
                     CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
                     () => OnRemoveEntry(frame, removed),
-                    deleteBounds, EnumButtonStyle.Small));
+                    deleteBounds, EnumButtonStyle.Small);
+
+                container.Add(remove);
+                _deleteButtons[label] = remove;
             }
 
             y += RowHeight + RowGap;
@@ -1967,6 +2156,29 @@ public class ConfigDialog : GuiDialog
             return;
         }
 
+        // A dictionary keyed by an enum has a fixed set of keys, so they are offered rather
+        // than typed. Typed, a name the enum does not have was written into the file and
+        // failed on the next load, with nothing on screen to say so.
+        if (KeyRules.EnumType(frame.Node.KeyNode) is Type enumType)
+        {
+            JObject holder = Subtree.Navigate(frame.Setting.Value.Token, frame.Path) as JObject ?? new JObject();
+
+            // Its own name, and every member no other entry has taken. A name the enum does
+            // not have - a stale file - is still listed, so the entry can be moved onto one.
+            string[] choices = Enum.GetNames(enumType)
+                .Where(name => name == existing || holder[name] == null)
+                .ToArray();
+            if (!choices.Contains(existing)) choices = [existing, .. choices];
+
+            GuiElementDropDown dropdown = new(capi, choices, choices, Math.Max(0, Array.IndexOf(choices, existing)),
+                (code, on) => { if (on && code != existing) OnRenameKey(frame, existing, code); },
+                bounds, CairoFont.WhiteDetailText(), false);
+
+            container.Add(dropdown);
+            _keyWidgets[label] = dropdown;
+            return;
+        }
+
         CommittingTextInput input = new(capi, bounds,
             text => OnRenameKey(frame, existing, text.Trim()),
             CairoFont.WhiteDetailText());
@@ -1975,6 +2187,7 @@ public class ConfigDialog : GuiDialog
         if (placeholder != null) input.SetPlaceHolderText(placeholder);
 
         container.Add(input);
+        _keyWidgets[label] = input;
         _afterCompose.Add(() => input.SetValue(existing));
     }
 
@@ -2005,16 +2218,9 @@ public class ConfigDialog : GuiDialog
     private void AddEntryValue(GuiElementContainer container, ContainerFrame frame, object step, string label,
         JToken value, SchemaNode? schema, ElementBounds bounds, string key)
     {
-        bool opens = schema != null
-            && schema.Kind is SchemaKind.Object or SchemaKind.Dictionary or SchemaKind.List;
-
-        if (opens)
+        if (schema != null && schema.Kind is SchemaKind.Object or SchemaKind.Dictionary or SchemaKind.List)
         {
-            List<object> path = new(frame.Path) { step };
-            container.Add(new GuiElementTextButton(capi, NestedButtonText(value, schema!) + "  >",
-                CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
-                () => OpenNested(frame, path, schema!, label),
-                bounds, EnumButtonStyle.Small));
+            AddNestedButton(container, frame, step, label, value, schema, bounds);
             return;
         }
 
@@ -2024,7 +2230,28 @@ public class ConfigDialog : GuiDialog
             return;
         }
 
-        AddEntryControl(container, frame, step, value, schema, bounds, key);
+        ConfigSetting setting = EntrySetting(frame, step, value, schema, label);
+        _settingsByKey[key] = setting;
+        AddControl(container, setting, bounds, key);
+
+        // A list of codes describes its elements with the same attribute a dictionary uses
+        // for its keys, so the hint applies here too.
+        if (frame.Node.Kind == SchemaKind.List && _widgets[key] is GuiElementTextInput input
+            && CodeHints.Placeholder(frame.Node.KeySource) is string placeholder)
+        {
+            input.SetPlaceHolderText(placeholder);
+        }
+    }
+
+    /// <summary>A value that is itself a container or an object opens another screen.</summary>
+    private void AddNestedButton(GuiElementContainer container, ContainerFrame frame, object step, string label,
+        JToken value, SchemaNode schema, ElementBounds bounds)
+    {
+        List<object> path = new(frame.Path) { step };
+        container.Add(new GuiElementTextButton(capi, NestedButtonText(value, schema) + "  >",
+            CairoFont.WhiteDetailText(), CairoFont.WhiteDetailText().WithColor(GuiStyle.ActiveButtonTextColor),
+            () => OpenNested(frame, path, schema, label),
+            bounds, EnumButtonStyle.Small));
     }
 
     private static string NestedButtonText(JToken value, SchemaNode schema) => schema.Kind switch
@@ -2037,84 +2264,6 @@ public class ConfigDialog : GuiDialog
             _ => "empty"
         }
     };
-
-    /// <summary>A control for one scalar sitting inside a container, bound to its place in the subtree.</summary>
-    private void AddEntryControl(GuiElementContainer container, ContainerFrame frame, object step,
-        JToken value, SchemaNode schema, ElementBounds bounds, string key)
-    {
-        Type type = Nullable.GetUnderlyingType(schema.MemberType) ?? schema.MemberType;
-
-        if (type.IsEnum)
-        {
-            string[] names = Enum.GetNames(type);
-            int selected = Math.Max(0, Array.IndexOf(names, value.ToString()));
-
-            Remember(key, container, new GuiElementDropDown(capi, names, names, selected,
-                (code, on) => { if (on) Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(code)); },
-                bounds, CairoFont.WhiteDetailText(), false));
-            return;
-        }
-
-        switch (schema.ScalarType)
-        {
-            case ConfigSettingType.Boolean:
-            {
-                GuiElementSwitch toggle = new(capi,
-                    on => Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(on)), bounds);
-                Remember(key, container, toggle);
-                bool on = value.Type == JTokenType.Boolean && value.Value<bool>();
-                _afterCompose.Add(() => toggle.On = on);
-                break;
-            }
-
-            case ConfigSettingType.Integer:
-            case ConfigSettingType.Float:
-            {
-                bool wholeNumbers = schema.ScalarType == ConfigSettingType.Integer;
-                GuiElementNumberInput number = new(capi, bounds,
-                    text => OnEntryNumberTyped(frame, step, text, wholeNumbers), CairoFont.WhiteDetailText());
-                Remember(key, container, number);
-                string text = value.ToString();
-                _afterCompose.Add(() => number.SetValue(text));
-                break;
-            }
-
-            default:
-            {
-                GuiElementTextInput input = new(capi, bounds,
-                    text => Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(text)),
-                    CairoFont.WhiteDetailText());
-                Remember(key, container, input);
-
-                // A list of codes describes its elements with the same attribute a dictionary
-                // uses for its keys, so the hint and the mark apply here too.
-                if (frame.Node.Kind == SchemaKind.List)
-                {
-                    string? placeholder = CodeHints.Placeholder(frame.Node.KeySource);
-                    if (placeholder != null) input.SetPlaceHolderText(placeholder);
-                }
-
-                string text = value.Type == JTokenType.String ? value.Value<string>() ?? "" : value.ToString();
-                _afterCompose.Add(() => input.SetValue(text));
-                break;
-            }
-        }
-    }
-
-    private static void OnEntryNumberTyped(ContainerFrame frame, object step, string text, bool wholeNumbers)
-    {
-        if (wholeNumbers)
-        {
-            if (int.TryParse(text, out int parsed)) Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(parsed));
-            return;
-        }
-
-        if (float.TryParse(text, System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out float value))
-        {
-            Subtree.SetValue(frame.Setting, frame.Path, step, new JValue(value));
-        }
-    }
 
     /// <summary>
     /// Add, or a line saying why not. A dictionary keyed by a three member enum that already
@@ -2213,15 +2362,40 @@ public class ConfigDialog : GuiDialog
     {
         if (from == to) return;
 
-        if (!Subtree.Rename(frame.Setting, frame.Path, from, to))
+        if (!TryRename(frame, from, to, out string reason))
         {
-            capi.TriggerIngameError(this, "duplicate-key",
-                string.IsNullOrWhiteSpace(to)
-                    ? "A key cannot be blank."
-                    : $"There is already an entry called '{to}'.");
+            capi.TriggerIngameError(this, "bad-key", reason);
         }
 
         Recompose();
+    }
+
+    /// <summary>
+    /// Renames an entry, or says why not. A key the dictionary's own key type cannot read
+    /// is refused here, at the keyboard, rather than written to the file to fail on the
+    /// next load - which used to happen in silence, with the entry simply gone.
+    /// </summary>
+    private static bool TryRename(ContainerFrame frame, string from, string to, out string reason)
+    {
+        reason = "";
+        if (from == to) return true;
+
+        if (string.IsNullOrWhiteSpace(to))
+        {
+            reason = "A key cannot be blank.";
+            return false;
+        }
+
+        if (!KeyRules.Accepts(frame.Node.KeyNode, to, out string canonical, out reason)) return false;
+        if (canonical == from) return true;
+
+        if (!Subtree.Rename(frame.Setting, frame.Path, from, canonical))
+        {
+            reason = $"There is already an entry called '{canonical}'.";
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>Rebuild the screen and push current values back into it.</summary>

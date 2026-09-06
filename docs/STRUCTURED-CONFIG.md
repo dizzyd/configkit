@@ -110,7 +110,9 @@ needs a different set of columns — key, value, delete — than a settings row 
 
 ### A dictionary of classes drills down again
 
-The value's own fields, each with the right control:
+The value's own fields, each with the right control — the same control the field would
+have had at the root: a slider for a `[Range]`, a dropdown for an enum, an empty box for a
+nullable, and the same validation:
 
 ![A dictionary of objects](screenshots/ck-4-dictionary.png)
 
@@ -203,8 +205,16 @@ public int Doors = 4;
 ```
 
 A value that fails is **kept on screen so it can be corrected, and not assigned to your
-object** — your mod keeps the last value its own attributes agreed to, and the message
-appears at the bottom of the window. `config.Errors` has the same thing in code.
+object** — your mod keeps the last value its own attributes agreed to. The row says so
+itself: its label turns red and a mark appears past its Reset button, with the message as
+the mark's tooltip. The same message sits at the foot of the window, which is where a row
+that is folded or scrolled away still gets to speak. `config.Errors` has it in code.
+
+**Entries are checked too.** A `[Range]` on a field of the class a dictionary or list holds
+constrains that field in every entry, and the container's own row reports which entry and
+which field — `wolf > Chance: The field Chance must be between 0 and 1`. The whole container
+is held back from your object until the entry is fixed, so an invalid entry never reaches
+your code half-applied.
 
 This is what makes an open bound mean something: `[Range(0, double.PositiveInfinity)]` takes
 the number input rather than a slider, and typing `-5` into it is now refused rather than
@@ -353,8 +363,13 @@ its old number.
 **Containers** — `Dictionary<,>`, `List<>`, `HashSet<>`, arrays, and anything implementing
 `IDictionary<,>`, `IList<>`, `ICollection<>` or `IReadOnlyCollection<>`.
 
-**Dictionary keys** — `string`, enums, and any type with a `TypeConverter`, which includes
-`AssetLocation`.
+**Dictionary keys** — `string`, enums, whole numbers, and any type with a `TypeConverter`,
+which includes `AssetLocation`. An enum key is chosen from a dropdown of the members not
+already in use rather than typed; a `[Flags]` enum's keys are combinations, so those stay
+typed and `Read, Write` is accepted. Any other key type is checked as it is typed, the way
+the file reader would check it and against the key's own type: `seven` is refused for a
+`Dictionary<int, …>` and `300` for a `Dictionary<byte, …>`, with a message, where they used
+to be written to the file and lost on the next load.
 
 **Nesting** — classes inside classes, dictionaries of dictionaries, lists of classes
 holding lists. Capped at five levels deep, and a class that holds itself is detected and
@@ -380,7 +395,9 @@ null, because for these null is a value and not merely an absence:
 public float? MaintenanceLimit { get; set; }        // null is not 0
 ```
 
-- a number reads **empty** when it is null, and clearing the box sets it back to null
+- a number reads **empty** when it is null, clearing the box sets it back to null, and the
+  box stays empty when it loses focus — the stock number input writes a 0 there, which for
+  the member above would silently turn "no limit" into "no repair"
 - it takes the number input rather than a slider, because a slider has no position for unset
 - a `bool?` is a three-way dropdown — `(unset)`, `true`, `false` — rather than a switch
 - an enum or `[AllowedValues]` dropdown gains an `(unset)` entry

@@ -82,11 +82,12 @@ public class NullableTests
 
         try
         {
-            // A slider has no position for "unset", so a nullable number takes the input.
-            Assert.Equal("GuiElementNumberInput", dialog.ControlKindFor("MaintenanceLimit"));
+            // A slider has no position for "unset", so a nullable number takes the input -
+            // the one that leaves an empty box empty.
+            Assert.Equal("NullableNumberInput", dialog.ControlKindFor("MaintenanceLimit"));
 
             // Even where the range would otherwise earn a slider.
-            Assert.Equal("GuiElementNumberInput", dialog.ControlKindFor("Ratio"));
+            Assert.Equal("NullableNumberInput", dialog.ControlKindFor("Ratio"));
 
             // And a plain float still gets one - this is the guard that stops the change
             // from quietly turning every slider in the library into a text box.
@@ -125,6 +126,95 @@ public class NullableTests
 
             dialog.TypeInto("MaintenanceLimit", "");
             Assert.Null(settings.MaintenanceLimit);
+        }
+        finally
+        {
+            dialog.TryClose();
+        }
+    }
+
+    /// <summary>
+    /// And stays null when the box loses focus. The stock number input writes a 0 into an
+    /// empty box the moment the player clicks anywhere else, so clearing the box worked
+    /// right up until they stopped looking at it. Reported by TheInsanityGod as "nullable
+    /// numbers jump back to 0".
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    [SingleplayerOnly]
+    public async Task LosingFocusDoesNotTurnTheNullIntoZero()
+    {
+        await OnClient();
+
+        Limits settings = new();
+        Config config = new(Capi, "cknull7", "Nullable", settings, "ck-null7.json");
+
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { ["cknull7"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(8);
+
+        try
+        {
+            dialog.TypeInto("MaintenanceLimit", "5");
+            dialog.TypeInto("MaintenanceLimit", "");
+            Assert.Null(settings.MaintenanceLimit);
+
+            Assert.True(dialog.Blur("MaintenanceLimit"));
+            await Frames.Wait(2);
+
+            Assert.Equal("", dialog.NumberTextFor("MaintenanceLimit"), "losing focus put a number in the box");
+            Assert.Null(settings.MaintenanceLimit, "losing focus turned the null into a number");
+        }
+        finally
+        {
+            dialog.TryClose();
+        }
+    }
+
+    /// <summary>
+    /// "(unset)" on a nullable enum at the root writes null and reaches the object as null.
+    /// The value went null but the mapping key stayed, and a mapped setting is written and
+    /// assigned through its key - so the file and the object kept the old member.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    [SingleplayerOnly]
+    public async Task UnsettingANullableEnumWritesNull()
+    {
+        await OnClient();
+
+        Limits settings = new();
+        Config config = new(Capi, "cknull8", "Nullable", settings, "ck-null8.json");
+        config.AssignSettingsValues(settings);
+        Assert.Equal(Difficulty.Brutal, settings.SetLevel);
+
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { ["cknull8"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(8);
+
+        try
+        {
+            var rect = dialog.ScreenRectFor("SetLevel");
+            Assert.NotNull(rect, "no dropdown on screen");
+            (double x, double y, double w, double h) = rect!.Value;
+
+            // Open the dropdown, then its first entry, which is "(unset)".
+            foreach (double at in new[] { y + h / 2, y + h + 15 * Vintagestory.API.Config.RuntimeEnv.GUIScale })
+            {
+                await Input.MouseMove((int)(x + w / 2), (int)at);
+                await Frames.Wait(1);
+                dialog.OnMouseDown(new Vintagestory.API.Client.MouseEvent((int)(x + w / 2), (int)at, Vintagestory.API.Common.EnumMouseButton.Left, 0));
+                await Frames.Wait(2);
+                dialog.OnMouseUp(new Vintagestory.API.Client.MouseEvent((int)(x + w / 2), (int)at, Vintagestory.API.Common.EnumMouseButton.Left, 0));
+                await Frames.Wait(2);
+            }
+
+            Assert.Equal("(unset)", dialog.DropdownValueFor("SetLevel"));
+            Assert.Null(settings.SetLevel, "the object kept the old member");
+
+            config.WriteToFile();
+            Assert.True(config.ReadFromFile());
+            Assert.True(((ConfigSetting)config.GetSetting("SetLevel")!).IsNull, "the file kept the old member");
         }
         finally
         {
@@ -232,9 +322,10 @@ public class NullableTests
         ConfigSetting level = (ConfigSetting)config.GetSetting("Level")!;
         Assert.True(level.IsNull, "an unset enum? should be null, not its first member");
 
-        // And one with a value still resolves to that member by name.
+        // And one with a value still resolves to that member by name. The key is the name;
+        // the value is what the key maps to, as it is after any read of the file.
         ConfigSetting set = (ConfigSetting)config.GetSetting("SetLevel")!;
-        Assert.Equal("Brutal", set.Value.Token?.ToString());
+        Assert.Equal("Brutal", set.MappingKey);
 
         // Both reach the object.
         Limits loaded = new() { Level = Difficulty.Gentle, SetLevel = Difficulty.Gentle };

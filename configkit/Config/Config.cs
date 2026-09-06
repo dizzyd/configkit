@@ -636,7 +636,51 @@ public sealed class Config : IConfig, IDisposable
 
         foreach (ConfigSetting setting in settings.Values)
         {
-            setting.Value = ReadStoredValue(jsonConfigObject, setting) ?? setting.DefaultValue;
+            ApplyStored(setting, ReadStoredValue(jsonConfigObject, setting) ?? setting.DefaultValue);
+        }
+    }
+
+    /// <summary>
+    /// Puts a value read from the file onto its setting. A mapped setting - an enum - is
+    /// stored by member name, and has to come back through its key: assigning the name as
+    /// the value left the key at the default, which is what the object was then given and
+    /// what the constructor's own save wrote straight back over the file. Every managed
+    /// config's enums reset on every start, and a reload from the menu, which took the
+    /// other path, quietly put them right again.
+    ///
+    /// A number is read too: a file the mod wrote itself, before ConfigKit, holds the enum's
+    /// number. A name or number the mapping does not know keeps the default, because a
+    /// member renamed away has nothing to land on.
+    /// </summary>
+    private static void ApplyStored(ConfigSetting setting, JsonObject value)
+    {
+        if (setting.Validation?.Mapping is not { } mapping)
+        {
+            setting.Value = value;
+            return;
+        }
+
+        JToken? token = value.Token;
+
+        if (setting.Nullable && (token == null || token.Type == JTokenType.Null))
+        {
+            setting.MappingKey = null;
+            setting.Value = value;
+            return;
+        }
+
+        if (token?.Type == JTokenType.String && mapping.ContainsKey(value.AsString()))
+        {
+            setting.MappingKey = value.AsString();
+            return;
+        }
+
+        if (token?.Type == JTokenType.Integer)
+        {
+            int number = value.AsInt();
+            string? byNumber = mapping.FirstOrDefault(entry => entry.Value.Token?.Type == JTokenType.Integer
+                                                              && entry.Value.AsInt() == number).Key;
+            if (byNumber != null) setting.MappingKey = byNumber;
         }
     }
 
@@ -645,8 +689,15 @@ public sealed class Config : IConfig, IDisposable
     /// is stored as the member name, so a renamed member fails to resolve loudly instead of
     /// silently landing on whatever now holds its old ordinal.
     /// </summary>
-    private static JsonObject StoredForm(ConfigSetting setting, JsonObject value)
-        => setting.Validation?.Mapping == null ? value : new(new JValue(setting.MappingKey));
+    internal static JsonObject StoredForm(ConfigSetting setting, JsonObject value)
+    {
+        if (setting.Validation?.Mapping == null) return value;
+
+        // A nullable enum with no member chosen has no key. JValue(string) with a null
+        // string is a string-typed token holding null, which serialises fine but is not a
+        // JSON null to anything that asks the token its type.
+        return new(setting.MappingKey == null ? JValue.CreateNull() : new JValue(setting.MappingKey));
+    }
 
     /// <summary>
     /// Reads a setting out of a stored document, trying any code it used to be written under
@@ -874,6 +925,37 @@ public sealed class Config : IConfig, IDisposable
         return value;
     }
 
+    /// <summary>
+    /// A setting for one value inside a container: a field of the class a dictionary holds,
+    /// or one element of a list. The screen builds these as it draws an entry, so an entry's
+    /// row gets exactly the control, the range check and the null handling a root row does -
+    /// the definition is the same one a root member would have been given, read the same way.
+    ///
+    /// Not stored anywhere. Its value is a copy; the caller writes edits back into the
+    /// container's own subtree, which is the setting that actually persists.
+    /// </summary>
+    internal static ConfigSetting SettingFor(SchemaNode node, string domain, ICoreAPI api)
+    {
+        JObject definition = node.Kind == SchemaKind.Scalar
+            ? SettingDefinition(node, owner: null, domain)
+            : ContainerDefinition(node, owner: null, domain);
+
+        ConfigSettingType type = node.Kind == SchemaKind.Scalar ? node.ScalarType : ConfigSettingType.Other;
+
+        // With no object to read a default from, an enum's default is null - and a mapping
+        // whose default is null is read as "no mapping" unless the setting is nullable, which
+        // would cost the entry its dropdown. Any member will do: the real value replaces it.
+        if (!node.Nullable && definition["mapping"] is JObject mapping && mapping.Count > 0
+            && (definition["default"] == null || definition["default"]!.Type == JTokenType.Null))
+        {
+            definition["default"] = mapping.Properties().First().Name;
+        }
+
+        ConfigSetting setting = ConfigSetting.FromJson(new JsonObject(definition), type, domain, node.Path, api);
+        setting.Node = node;
+        return setting;
+    }
+
     private static JObject SettingDefinition(SchemaNode node, object? owner, string domain)
     {
         JObject definition = [];
@@ -970,8 +1052,11 @@ public sealed class Config : IConfig, IDisposable
 
     private static JValue GetDefaultValue(SchemaNode node, object? owner)
     {
-        MemberInfo info = node.Member;
+        MemberInfo? info = node.Member;
         ConfigSettingType settingType = node.ScalarType;
+
+        // The shape of a container's values has no member, and so no default of its own.
+        if (info == null) return new JValue((object?)null);
 
         DefaultValueAttribute? attribute = info.GetCustomAttribute<DefaultValueAttribute>();
         object? value = attribute?.Value
@@ -1007,9 +1092,9 @@ public sealed class Config : IConfig, IDisposable
             return new JValue(value);
         }
     }
-    private static void SetFloatSettingDefinition(MemberInfo info, JObject definition)
+    private static void SetFloatSettingDefinition(MemberInfo? info, JObject definition)
     {
-        RangeAttribute? rangeAttribute = info.GetCustomAttribute<RangeAttribute>();
+        RangeAttribute? rangeAttribute = info?.GetCustomAttribute<RangeAttribute>();
         if (rangeAttribute != null)
         {
             JObject range = new()
@@ -1020,7 +1105,7 @@ public sealed class Config : IConfig, IDisposable
             definition.Add("range", range);
         }
 
-        AllowedValuesAttribute? allowedValuesAttribute = info.GetCustomAttribute<AllowedValuesAttribute>();
+        AllowedValuesAttribute? allowedValuesAttribute = info?.GetCustomAttribute<AllowedValuesAttribute>();
         if (allowedValuesAttribute != null)
         {
             IEnumerable<float> allowedValues = allowedValuesAttribute.Values.Select(Convert.ToSingle);
@@ -1028,9 +1113,9 @@ public sealed class Config : IConfig, IDisposable
             definition.Add("values", values);
         }
     }
-    private static void SetIntegerSettingDefinition(MemberInfo info, Type memberType, JObject definition)
+    private static void SetIntegerSettingDefinition(MemberInfo? info, Type memberType, JObject definition)
     {
-        RangeAttribute? rangeAttribute = info.GetCustomAttribute<RangeAttribute>();
+        RangeAttribute? rangeAttribute = info?.GetCustomAttribute<RangeAttribute>();
         if (rangeAttribute != null)
         {
             JObject range = new()
@@ -1042,46 +1127,38 @@ public sealed class Config : IConfig, IDisposable
         }
 
         Type? valueType = Nullable.GetUnderlyingType(memberType) ?? memberType;
-        if (valueType?.IsEnum == true)
+        if (valueType?.IsEnum == true && EnumMapping(valueType) is JObject mapping)
         {
-            string[] enumNames = valueType.GetEnumNames();
-            int[] enumValues = (int[])valueType.GetEnumValues();
+            definition.Add("mapping", mapping);
 
-            if (enumNames.Length == enumValues.Length)
+            // An enum is stored by name, so the numeric default is swapped for one -
+            // unless there is no default, which is what a nullable enum left unset has.
+            // JValue holding null is not a C# null, so "?." does not short-circuit it and
+            // Value<int>() takes it to Convert.ChangeType(null, typeof(int)): an
+            // InvalidCastException thrown out of the constructor, before its try block,
+            // and straight through the registering mod's StartPre. The mod does not load.
+            JToken? declared = definition["default"];
+            bool unset = declared == null || declared.Type == JTokenType.Null;
+
+            definition.Remove("default");
+
+            if (unset)
             {
-                JObject mapping = [];
-                for (int index = 0; index < enumNames.Length; index++)
-                {
-                    mapping.Add(enumNames[index], enumValues[index]);
-                }
-                definition.Add("mapping", mapping);
-
-                // An enum is stored by name, so the numeric default is swapped for one -
-                // unless there is no default, which is what a nullable enum left unset has.
-                // JValue holding null is not a C# null, so "?." does not short-circuit it and
-                // Value<int>() takes it to Convert.ChangeType(null, typeof(int)): an
-                // InvalidCastException thrown out of the constructor, before its try block,
-                // and straight through the registering mod's StartPre. The mod does not load.
-                JToken? declared = definition["default"];
-                bool unset = declared == null || declared.Type == JTokenType.Null;
-
-                definition.Remove("default");
-
-                if (unset)
-                {
-                    // Naming a member here would invent a value the author did not choose,
-                    // and for a nullable enum "none" is the value they did.
-                    definition.Add("default", JValue.CreateNull());
-                }
-                else
-                {
-                    int indexClamped = Math.Max(enumValues.IndexOf(declared!.Value<int>()), 0);
-                    definition.Add("default", enumNames[indexClamped]);
-                }
+                // Naming a member here would invent a value the author did not choose,
+                // and for a nullable enum "none" is the value they did.
+                definition.Add("default", JValue.CreateNull());
+            }
+            else
+            {
+                long number = declared!.Value<long>();
+                string name = mapping.Properties()
+                    .FirstOrDefault(member => member.Value.Value<long>() == number)?.Name
+                    ?? mapping.Properties().First().Name;
+                definition.Add("default", name);
             }
         }
 
-        AllowedValuesAttribute? allowedValuesAttribute = info.GetCustomAttribute<AllowedValuesAttribute>();
+        AllowedValuesAttribute? allowedValuesAttribute = info?.GetCustomAttribute<AllowedValuesAttribute>();
         if (allowedValuesAttribute != null)
         {
             IEnumerable<int> allowedValues = allowedValuesAttribute.Values.Select(Convert.ToInt32);
@@ -1089,9 +1166,44 @@ public sealed class Config : IConfig, IDisposable
             definition.Add("values", values);
         }
     }
-    private static void SetStringSettingDefinition(MemberInfo info, JObject definition)
+    /// <summary>
+    /// An enum's members by name, as the settings model's integers. Read through Convert
+    /// rather than cast: the values array is typed by the enum's backing type, and casting it
+    /// to int[] threw for an enum declared <c>: byte</c>, <c>: short</c> or <c>: long</c> -
+    /// at registration for a root member, so the mod did not load. A member the model's int
+    /// cannot hold leaves the enum with no mapping, and so a plain number input, which is
+    /// honest where a truncated mapping would not be.
+    /// </summary>
+    private static JObject? EnumMapping(Type enumType)
     {
-        AllowedValuesAttribute? allowedValuesAttribute = info.GetCustomAttribute<AllowedValuesAttribute>();
+        JObject mapping = [];
+
+        // By name, not by value: two members may share a value - Enabled = 1 beside
+        // On = 1 - and a file saved under either name has to keep reading. Going from the
+        // values back to names kept one of them and silently reset the other to the default.
+        foreach (string name in Enum.GetNames(enumType))
+        {
+            long number;
+            try
+            {
+                number = Convert.ToInt64(Enum.Parse(enumType, name), CultureInfo.InvariantCulture);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+
+            if (number < int.MinValue || number > int.MaxValue) return null;
+
+            mapping.Add(name, (int)number);
+        }
+
+        return mapping.Count == 0 ? null : mapping;
+    }
+
+    private static void SetStringSettingDefinition(MemberInfo? info, JObject definition)
+    {
+        AllowedValuesAttribute? allowedValuesAttribute = info?.GetCustomAttribute<AllowedValuesAttribute>();
         if (allowedValuesAttribute != null)
         {
             IEnumerable<string?> allowedValues = allowedValuesAttribute.Values.Select(Convert.ToString);
@@ -1443,20 +1555,7 @@ public sealed class Config : IConfig, IDisposable
         JsonObject jsonConfigObject = new(JObject.Parse(json));
         foreach (ConfigSetting setting in settings.Where(item => !onlyClientSide || item.ClientSide))
         {
-            JsonObject value = ReadStoredValue(jsonConfigObject, setting) ?? setting.DefaultValue;
-
-            if (setting.Validation?.Mapping == null)
-            {
-                setting.Value = value;
-                continue;
-            }
-
-            string key = value.AsString("");
-            if (setting.Validation?.Mapping?.ContainsKey(key) == true)
-            {
-                setting.Value = setting.Validation.Mapping[key];
-                setting.MappingKey = key;
-            }
+            ApplyStored(setting, ReadStoredValue(jsonConfigObject, setting) ?? setting.DefaultValue);
         }
         return true;
     }

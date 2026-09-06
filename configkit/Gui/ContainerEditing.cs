@@ -216,6 +216,9 @@ internal static class KeyGenerator
 
     private static JToken BlankScalar(SchemaNode node)
     {
+        // For a nullable, "nothing yet" is null - not a zero that reads as a value.
+        if (node.Nullable) return JValue.CreateNull();
+
         Type type = Nullable.GetUnderlyingType(node.MemberType) ?? node.MemberType;
 
         if (type.IsEnum) return new JValue(Enum.GetNames(type).FirstOrDefault() ?? "");
@@ -229,7 +232,7 @@ internal static class KeyGenerator
         };
     }
 
-    private static bool IsWholeNumber(Type type)
+    internal static bool IsWholeNumber(Type type)
     {
         Type actual = Nullable.GetUnderlyingType(type) ?? type;
 
@@ -237,6 +240,91 @@ internal static class KeyGenerator
             || actual == typeof(uint) || actual == typeof(ulong) || actual == typeof(ushort)
             || actual == typeof(byte) || actual == typeof(sbyte);
     }
+}
+
+/// <summary>
+/// What a typed key has to be, given the dictionary's own key type.
+///
+/// A key is edited as text, but a <c>Dictionary&lt;Difficulty, float&gt;</c> reads its keys
+/// back as Difficulty, and a key it cannot read used to be written to the file regardless:
+/// the deserialiser then threw on the next load, the exception was caught, and the entry -
+/// or the whole dictionary - was silently gone. Reported by TheInsanityGod, who typed into
+/// an enum-keyed dictionary and got nothing back but the error being swallowed.
+/// </summary>
+internal static class KeyRules
+{
+    /// <summary>
+    /// The enum a dictionary's keys are chosen from, or null when they are typed: not an
+    /// enum, or a [Flags] enum, whose keys are combinations - "Read, Write" - that no list
+    /// of members can offer.
+    /// </summary>
+    public static Type? EnumType(SchemaNode? keyNode)
+    {
+        Type? type = KeyType(keyNode);
+        return type?.IsEnum == true && !IsFlags(type) ? type : null;
+    }
+
+    private static bool IsFlags(Type type) => type.GetCustomAttributes(typeof(FlagsAttribute), false).Length > 0;
+
+    private static Type? KeyType(SchemaNode? keyNode)
+        => keyNode == null ? null : Nullable.GetUnderlyingType(keyNode.MemberType) ?? keyNode.MemberType;
+
+    /// <summary>
+    /// Whether the text can be one of this dictionary's keys, and the spelling the key type
+    /// itself uses for it - an enum member in its own case, a number without padding.
+    /// </summary>
+    public static bool Accepts(SchemaNode? keyNode, string text, out string canonical, out string reason)
+    {
+        canonical = text;
+        reason = "";
+
+        Type? type = KeyType(keyNode);
+        if (type == null || type == typeof(string)) return true;
+
+        if (type.IsEnum)
+        {
+            // A [Flags] key may be a combination, which TryParse reads and IsDefined does
+            // not; a bare number is refused for both, because the file would hold a number
+            // where every other key is a name.
+            if (Enum.TryParse(type, text.Trim(), ignoreCase: true, out object? member) && member != null
+                && (IsFlags(type) ? !IsNumeric(member.ToString()!) : Enum.IsDefined(type, member)))
+            {
+                canonical = member.ToString()!;
+                return true;
+            }
+
+            reason = IsFlags(type)
+                ? $"'{text}' is not a combination of {string.Join(", ", Enum.GetNames(type))}."
+                : $"'{text}' is not one of {string.Join(", ", Enum.GetNames(type))}.";
+            return false;
+        }
+
+        // Anything else with a string form - a number, or AssetLocation - is asked the same
+        // way Newtonsoft will ask it when the file is read: through the type's own
+        // converter, which knows a byte stops at 255 and a ulong does not stop at long.
+        bool number = KeyGenerator.IsWholeNumber(type);
+
+        try
+        {
+            System.ComponentModel.TypeConverter converter = System.ComponentModel.TypeDescriptor.GetConverter(type);
+            if (converter.CanConvertFrom(typeof(string)))
+            {
+                object? parsed = converter.ConvertFromInvariantString(text.Trim());
+                if (number && parsed != null) canonical = Convert.ToString(parsed, System.Globalization.CultureInfo.InvariantCulture)!;
+            }
+            return true;
+        }
+        catch (Exception exception)
+        {
+            reason = number
+                ? $"'{text}' is not a whole number a {SchemaBuilder.Describe(type)} can hold."
+                : $"'{text}' is not a valid {SchemaBuilder.Describe(type)}: {exception.Message}";
+            return false;
+        }
+    }
+
+    private static bool IsNumeric(string text)
+        => text.Length > 0 && text.All(c => char.IsDigit(c) || c == '-');
 }
 
 /// <summary>

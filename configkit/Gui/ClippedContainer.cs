@@ -35,9 +35,6 @@ namespace ConfigKit.Gui;
 /// </summary>
 public class ClippedContainer : GuiElementContainer
 {
-    /// Reused so a per-frame cull allocates nothing.
-    private readonly List<GuiElement> _visible = new();
-
     /// Handed to the base class so it draws its own surface without walking any children.
     private readonly List<GuiElement> _none = new();
 
@@ -73,35 +70,37 @@ public class ClippedContainer : GuiElementContainer
     }
 
     /// <summary>
-    /// Runs <paramref name="action"/> with only the visible rows in <see cref="Elements"/>.
-    /// The base class walks that list directly, so swapping it is what lets a stock
-    /// container be culled without reimplementing its rendering.
+    /// The rows a mouse event can reach: the visible ones, as a copy.
+    ///
+    /// This used to swap <see cref="GuiElementContainer.Elements"/> for the visible subset
+    /// while the base class ran its handler, and put the full list back afterwards. A row's
+    /// handler that rebuilds the screen - remove, add, rename, fold - runs inside that
+    /// window, and the rebuild disposes this container while the swap is in force: only the
+    /// visible rows were disposed, and every row scrolled out of view leaked its textures.
+    /// TheInsanityGod's traced log had 2817 of them from one minute of editing a long
+    /// dictionary, every one allocated by a row of a container screen. So the handlers
+    /// below walk their own list and never touch the field the disposer walks.
+    ///
+    /// A fresh list per event rather than a reused one: a handler can rebuild the screen or
+    /// re-enter this container, and neither may pull the list out from under the loop that
+    /// is walking it. Events are rare next to frames, so the allocation is nothing.
     /// </summary>
-    private void OnlyVisible(System.Action action)
+    private List<GuiElement> Reachable()
     {
-        List<GuiElement> all = Elements;
-
-        _visible.Clear();
-        foreach (GuiElement element in all)
+        List<GuiElement> reachable = new(Elements.Count);
+        foreach (GuiElement element in Elements)
         {
-            if (!Hidden(element)) _visible.Add(element);
+            if (!Hidden(element)) reachable.Add(element);
         }
 
-        Elements = _visible;
-        try
-        {
-            action();
-        }
-        finally
-        {
-            Elements = all;
-        }
+        return reachable;
     }
 
     public override void RenderInteractiveElements(float deltaTime)
     {
         // Let the base draw the container's own static texture, with no children of its own
-        // to walk, so that each child can then be rendered behind its own scissor.
+        // to walk, so that each child can then be rendered behind its own scissor. Nothing
+        // in that draw can call back into a handler, so the swap is safe here and only here.
         List<GuiElement> all = Elements;
         Elements = _none;
         try
@@ -135,14 +134,57 @@ public class ClippedContainer : GuiElementContainer
         }
     }
 
+    // The three handlers below are GuiElementContainer's own, over the reachable rows
+    // rather than Elements. The base class's fallbacks - OnMouseDownOnElement when the
+    // press was inside the container, nothing on move - are written out because a method
+    // cannot call its grandparent's implementation past the one it overrides.
+
     public override void OnMouseDown(ICoreClientAPI api, MouseEvent args)
-        => OnlyVisible(() => base.OnMouseDown(api, args));
+    {
+        bool beforeHandled = false;
+        bool nowHandled = false;
+
+        foreach (GuiElement element in Reachable())
+        {
+            if (!beforeHandled)
+            {
+                element.OnMouseDown(api, args);
+                nowHandled = args.Handled;
+            }
+
+            if (!beforeHandled && nowHandled)
+            {
+                if (element.Focusable && !element.HasFocus) element.OnFocusGained();
+            }
+            else if (element.Focusable && element.HasFocus)
+            {
+                element.OnFocusLost();
+            }
+
+            beforeHandled = nowHandled;
+        }
+
+        if (!args.Handled && IsPositionInside(args.X, args.Y)) OnMouseDownOnElement(api, args);
+    }
 
     public override void OnMouseUp(ICoreClientAPI api, MouseEvent args)
-        => OnlyVisible(() => base.OnMouseUp(api, args));
+    {
+        foreach (GuiElement element in Reachable())
+        {
+            element.OnMouseUp(api, args);
+        }
+
+        if (!args.Handled && IsPositionInside(args.X, args.Y)) OnMouseUpOnElement(api, args);
+    }
 
     public override void OnMouseMove(ICoreClientAPI api, MouseEvent args)
-        => OnlyVisible(() => base.OnMouseMove(api, args));
+    {
+        foreach (GuiElement element in Reachable())
+        {
+            element.OnMouseMove(api, args);
+            if (args.Handled) break;
+        }
+    }
 
     /// <summary>
     /// Key events reach whichever child has focus.
