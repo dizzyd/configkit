@@ -53,17 +53,31 @@ It also reads what your class already carries: your /// doc comments become the 
 messages you wrote - including your own ValidationAttribute - and a nullable value type
 keeps its null instead of showing it as zero.
 
-Guides:
-structured config (https://github.com/dizzyd/configkit/blob/main/docs/STRUCTURED-CONFIG.md)
-What each shape becomes on screen, with screenshots.
-·
-integrating (https://github.com/dizzyd/configkit/blob/main/docs/INTEGRATING.md)
-The API, and when your values are there.
-·
-migrating from configlib (https://github.com/dizzyd/configkit/blob/main/docs/MIGRATING.md)
-·
-the config file format (https://github.com/dizzyd/configkit/blob/main/docs/CONFIG-FORMAT.md)
+Full guides are linked under DOCUMENTATION, just below.
+
+DOCUMENTATION
+
+All of it lives in the repository, so it stays with the code it describes.
+
+  - Structured config (https://github.com/dizzyd/configkit/blob/main/docs/STRUCTURED-CONFIG.md)
+What each shape becomes on screen: nested classes, dictionaries, lists, and every attribute
+that steers them. With screenshots.
+
+  - Integrating (https://github.com/dizzyd/configkit/blob/main/docs/INTEGRATING.md)
+The API, when your values are actually there, client and server, and what to look at when a
+setting does not appear.
+
+  - The config file format (https://github.com/dizzyd/configkit/blob/main/docs/CONFIG-FORMAT.md)
 Settings, patches, JSON paths and expressions, for a mod with no C# at all.
+
+  - Migrating from configlib (https://github.com/dizzyd/configkit/blob/main/docs/MIGRATING.md)
+Four cases, and most mods fall into the one that needs no work.
+
+  - Compatibility (https://github.com/dizzyd/configkit/blob/main/docs/COMPATIBILITY.md)
+A survey of the 2,000 most-downloaded 1.22 mods, sorted by what each would have to change.
+
+  - What changed from configlib (https://github.com/dizzyd/configkit/blob/main/docs/CHANGES-FROM-CONFIGLIB.md)
+The deliberate differences, what was added, and the bugs fixed on the way.
 
 VERIFYING WHAT YOU DOWNLOADED
 
