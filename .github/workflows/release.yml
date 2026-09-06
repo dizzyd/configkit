@@ -46,6 +46,18 @@ jobs:
           fi
           echo "VERSION=$mod" >> "$GITHUB_ENV"
 
+      # A release without a note is a release nobody can read about. The note is what
+      # goes to ModDB, and the GitHub release carries it above the provenance table.
+      - name: Check the release note exists
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          note="docs/release-notes/${VERSION}.md"
+          if [ ! -s "$note" ]; then
+            echo "::error::no release note at $note - see docs/release-notes/README.md"
+            exit 1
+          fi
+          echo "NOTE=$note" >> "$GITHUB_ENV"
+
       - name: Resolve version (manual runs)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: echo "VERSION=$(jq -r .version configkit/modinfo.json)" >> "$GITHUB_ENV"
@@ -93,7 +105,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes=$(mktemp)
-          cat > "$notes" <<NOTES
+          cat "$NOTE" > "$notes"
+          cat >> "$notes" <<NOTES
+
+          ---
+
           Built by GitHub Actions from \`${GITHUB_SHA}\`.
 
           | | |
