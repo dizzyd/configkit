@@ -71,6 +71,19 @@ internal sealed class SchemaNode
     /// </summary>
     public bool Nullable;
     /// <summary>
+    /// True for a nested object declared nullable - <c>public SailsConfig? Sails;</c> - where
+    /// null means the whole section is off. WearAndTear does this: a sub-config set to null
+    /// in the file disables the feature it configures. Such a section gets a switch of its
+    /// own, and its object is left null rather than replaced with a fresh instance, which is
+    /// what used to happen and silently turned the feature back on.
+    ///
+    /// Read from the annotation, which the compiler emits for a '?' on a reference type
+    /// whether or not the project has nullable checking on. Only for objects: a plain
+    /// unannotated <c>public SailsConfig Sails;</c> holding null is an author who forgot to
+    /// initialise it, and that still gets an instance.
+    /// </summary>
+    public bool Optional;
+    /// <summary>
     /// Which section this member belongs to, as an identity rather than a caption:
     /// "cat:Doors" for a name the author chose, or the owning object's path for one derived
     /// from a class. The two namespaces cannot collide, which a shared display name could -
@@ -557,7 +570,26 @@ internal static class SchemaBuilder
         {
             node.Kind = SchemaKind.Opaque;
             notices.Add($"'{node.Path}' ({Describe(type)}) has no public settings; it is stored and shown as raw JSON.");
+            return;
         }
+
+        node.Optional = IsAnnotatedNullable(node.Member);
+    }
+
+    /// <summary>
+    /// Whether a member is declared with a '?' - the reference-type annotation, which is
+    /// metadata rather than a type and so is not what Nullable.GetUnderlyingType sees.
+    /// </summary>
+    private static bool IsAnnotatedNullable(MemberInfo member)
+    {
+        NullabilityInfoContext context = new();
+
+        return member switch
+        {
+            FieldInfo field => context.Create(field).ReadState == NullabilityState.Nullable,
+            PropertyInfo property => context.Create(property).ReadState == NullabilityState.Nullable,
+            _ => false
+        };
     }
 
     /// <summary>

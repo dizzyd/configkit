@@ -97,6 +97,31 @@ In the file it stays nested, exactly as `StoreModConfig` would have written it:
 }
 ```
 
+### An optional section
+
+Declare the nested class nullable and null means **off**:
+
+```csharp
+[Description("Sails on the mill. Null means the mill has none.")]
+public SailsConfig? Sails;
+```
+
+The section gets its own **Enabled** switch as its first row. Off, the rows beneath it show
+what the object would hold and take no edits, and the file says `"Sails": null` - exactly
+what a player who disabled the feature by hand would have written. On, the object is
+attached to your config with whatever was set in it, and the file holds it as an object.
+Switching off and on again keeps the values; a switch is not a reset.
+
+Your code reads the member as it always did: null while the section is off, an instance
+while it is on. Nothing is created behind your back.
+
+The `?` is what makes it optional. It is read from the compiled annotation, which the
+compiler emits whether or not your project has nullable checking on. A nested class declared
+without it and left uninitialised - `public SailsConfig Sails;` - is taken as an oversight
+and given an instance, as before.
+
+A section's own `[Description]` or doc comment is the line under its heading.
+
 ### A dictionary or list opens its own screen
 
 One row on the main screen showing how many entries it holds; clicking it opens the

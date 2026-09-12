@@ -194,10 +194,12 @@ internal sealed class JsonObjectPath
 
         foreach (JsonObject attribute in attributes)
         {
-            if (attribute?.KeyExists(key) == true)
+            // Only an object has keys. KeyExists indexes the token regardless, and on a
+            // null or a scalar - an optional section switched off is a null in the file -
+            // Newtonsoft throws rather than answering no.
+            if (attribute?.Token is JObject && attribute.KeyExists(key))
             {
                 result.Add(attribute[key]);
-                continue;
             }
         }
 

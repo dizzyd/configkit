@@ -876,7 +876,7 @@ public class ConfigDialog : GuiDialog
             // Two different reasons a row cannot be edited, and they read differently: one
             // says the server owns it, the other that nothing owns it.
             bool serverOwned = IsServerControlled(setting);
-            bool locked = serverOwned || setting.ReadOnly;
+            bool locked = serverOwned || setting.ReadOnly || SwitchedOff(setting);
             string labelText = serverOwned ? LabelFor(setting) + " (server)" : LabelFor(setting);
 
             // How tall this row is, decided before the measuring pass bails out. It used to
@@ -1048,6 +1048,13 @@ public class ConfigDialog : GuiDialog
     /// A server-side setting on a multiplayer client belongs to the server. Only a player
     /// with controlserver may change one, and the change is pushed over the network.
     /// </summary>
+    /// <summary>
+    /// A row under an optional section whose switch is off. The null the section holds is
+    /// the value; the rows show what the object would hold and take no edits until it is on.
+    /// </summary>
+    private bool SwitchedOff(ConfigSetting setting)
+        => _configs.TryGetValue(_domain, out Config? config) && config.IsSwitchedOff(setting);
+
     private bool IsServerControlled(ConfigSetting setting)
     {
         if (setting.ClientSide) return false;
@@ -1200,6 +1207,16 @@ public class ConfigDialog : GuiDialog
                         setting.Value = code == NullChoice ? FromNull() : FromBool(code == "true");
                     },
                     bounds, CairoFont.WhiteDetailText(), false));
+                break;
+
+            // An optional section's switch locks and unlocks the rows beneath it, so the
+            // screen is rebuilt when it moves - the same way a heading rebuilds it to fold.
+            case ConfigSettingType.Boolean when setting.Node is { Kind: SchemaKind.Object }:
+                Remember(key, container, new GuiElementSwitch(capi, on =>
+                {
+                    setting.Value = FromBool(on);
+                    Recompose();
+                }, bounds));
                 break;
 
             case ConfigSettingType.Boolean:

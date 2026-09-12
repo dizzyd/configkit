@@ -428,6 +428,10 @@ public sealed class Config : IConfig, IDisposable
         object? owner = OwnerFor(node, target);
         if (owner == null) return false;
 
+        // The switch on an optional section is not a value of its member: it decides
+        // whether the member holds its object or null.
+        if (node.Kind == SchemaKind.Object) return SetSectionEnabled(owner, node, setting.Value.AsBool());
+
         // Every value reaches the object here - a load from file, an edit, a sync from a
         // server - so this is the one place worth checking, and checking it here means a
         // value the author's own attributes reject never reaches their code. The setting
@@ -513,6 +517,12 @@ public sealed class Config : IConfig, IDisposable
     private string _modName;
     private readonly Dictionary<string, ConfigSetting> _settings;
     private readonly Dictionary<string, ConfigSetting> _clientSideSettings = new();
+    /// <summary>
+    /// The object behind each optional section that is currently off. Its rows read their
+    /// defaults from it and hold their edits in it; switching the section on attaches it to
+    /// the author's config, switching off takes the attached one back here.
+    /// </summary>
+    private readonly Dictionary<SchemaNode, object> _detached = new();
     private readonly SortedDictionary<float, IConfigBlock> _configBlocks;
     private readonly JsonObject _json;
     private readonly ConfigPatches _patches;
@@ -606,7 +616,20 @@ public sealed class Config : IConfig, IDisposable
 
         foreach (ConfigSetting setting in settings.Values)
         {
-            new JsonObjectPath(setting.YamlCode).SetOrCreate(defaults, StoredForm(setting, setting.DefaultValue));
+            // The same shape the file gets: an optional section is an object or a null at
+            // its path, never its switch's bare true or false - a leaf written after that
+            // would have to walk through a boolean to reach its own key.
+            if (IsSwitchedOff(setting, settings)) continue;
+
+            JsonObjectPath path = new(setting.YamlCode);
+
+            if (setting.Node is { Kind: SchemaKind.Object })
+            {
+                WriteSection(defaults, path, setting.DefaultValue.AsBool());
+                continue;
+            }
+
+            path.SetOrCreate(defaults, StoredForm(setting, setting.DefaultValue));
         }
 
         defaultConfig = defaults.Token.ToString(Newtonsoft.Json.Formatting.Indented);
@@ -636,8 +659,22 @@ public sealed class Config : IConfig, IDisposable
 
         foreach (ConfigSetting setting in settings.Values)
         {
-            ApplyStored(setting, ReadStoredValue(jsonConfigObject, setting) ?? setting.DefaultValue);
+            ApplyStored(setting, ReadStored(jsonConfigObject, setting) ?? setting.DefaultValue);
         }
+    }
+
+    /// <summary>
+    /// A setting's value as the file holds it, or null when the file does not. An optional
+    /// section's switch reads as whether the file holds an object at its path or a null; a
+    /// file from before the section existed says nothing and leaves the switch as it was.
+    /// </summary>
+    private static JsonObject? ReadStored(JsonObject stored, ConfigSetting setting)
+    {
+        JsonObject? value = ReadStoredValue(stored, setting);
+
+        return setting.Node is { Kind: SchemaKind.Object } && value != null
+            ? new JsonObject(new JValue(value.Token is JObject))
+            : value;
     }
 
     /// <summary>
@@ -731,7 +768,8 @@ public sealed class Config : IConfig, IDisposable
     {
         if (_schema == null) return;
 
-        foreach (SchemaNode node in _schema.Walk().Where(node => node.IsSetting))
+        // An optional section has a setting too - its switch - keyed by the object's own path.
+        foreach (SchemaNode node in _schema.Walk().Where(node => node.IsSetting || node.Optional))
         {
             if (settings.TryGetValue(node.Path, out ConfigSetting? setting)) setting.Node = node;
         }
@@ -812,7 +850,21 @@ public sealed class Config : IConfig, IDisposable
 
         foreach (IGrouping<string, (SchemaNode node, object? owner)> section in sections)
         {
-            AddSeparator(settings, section.Key, section.First().node.SectionLabel);
+            SchemaNode first = section.First().node;
+            SchemaNode? owning = SectionObject(section.Key, first);
+
+            // The class's own [Description] heads its section. It was read into the node
+            // and then never emitted, because sections are built from the leaves and the
+            // object node itself never came this way.
+            AddSeparator(settings, section.Key, first.SectionLabel, owning?.Comment);
+
+            // An optional section's switch sits first, before its rows. When the object
+            // is grouped into a named [Category] with other members instead, the switch
+            // says which section it is for.
+            if (first.Parent is { Optional: true } optional)
+            {
+                settings.Add(SwitchDefinition(optional, owning == null));
+            }
 
             foreach ((SchemaNode node, object? owner) in InOrder(section))
             {
@@ -875,15 +927,124 @@ public sealed class Config : IConfig, IDisposable
         };
     }
 
-    private static void AddSeparator(JArray settings, string code, string? title)
+    private static void AddSeparator(JArray settings, string code, string? title, string? text)
     {
-        settings.Add(new JObject
+        JObject separator = new()
         {
             { "type", "separator" },
             { "code", code },
             { "title", title ?? code },
             { "collapsible", true }
-        });
+        };
+
+        if (!string.IsNullOrWhiteSpace(text)) separator.Add("text", text);
+
+        settings.Add(separator);
+    }
+
+    /// <summary>
+    /// The nested object a section was derived from, or null for one an author named with
+    /// [Category] - a derived section's id is the object's own path.
+    /// </summary>
+    private static SchemaNode? SectionObject(string sectionId, SchemaNode member)
+        => member.Parent is { } parent && parent.Path == sectionId ? parent : null;
+
+    /// <summary>
+    /// The on/off switch of an optional section: a boolean setting keyed by the object's
+    /// path. On means the member holds its object; off means it holds null, and that is
+    /// what the file says too. Its default is whatever the author's object held when it
+    /// was registered - ResolveOwner has just been past it, so a null member is on the
+    /// detached list by now.
+    /// </summary>
+    private JObject SwitchDefinition(SchemaNode node, bool inNamedCategory)
+    {
+        string label = inNamedCategory
+            ? $"{node.Label ?? SchemaBuilder.Humanize(node.Code)} enabled"
+            : "Enabled";
+
+        return new JObject
+        {
+            { "code", node.Path },
+            { "ingui", label },
+            { "type", "boolean" },
+            { "default", !_detached.ContainsKey(node) },
+            { "comment", "Off is stored as null, which the mod reads as this section being disabled." }
+        };
+    }
+
+    /// <summary>
+    /// Whether a setting sits under an optional section that is off. Such a row is neither
+    /// written to the file nor editable on screen: the null it sits under is the value.
+    /// </summary>
+    internal bool IsSwitchedOff(ConfigSetting setting) => IsSwitchedOff(setting, _settings);
+
+    private static bool IsSwitchedOff(ConfigSetting setting, Dictionary<string, ConfigSetting> settings)
+    {
+        for (SchemaNode? ancestor = setting.Node?.Parent; ancestor != null; ancestor = ancestor.Parent)
+        {
+            if (!ancestor.Optional) continue;
+            if (settings.TryGetValue(ancestor.Path, out ConfigSetting? toggle) && !toggle.Value.AsBool()) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Attaches an optional section's object to the author's config or takes it off. The
+    /// object itself is kept either way, so switching a section off and on again does not
+    /// lose what was set in it.
+    /// </summary>
+    private bool SetSectionEnabled(object owner, SchemaNode node, bool on)
+    {
+        object? current = ReadMember(node.Member, owner);
+        if (on == (current != null)) return true;
+
+        if (!on)
+        {
+            _detached[node] = current!;
+            return WriteMember(node.Member, owner, null);
+        }
+
+        object? instance = Detached(node);
+        if (instance == null || !WriteMember(node.Member, owner, instance)) return false;
+
+        _detached.Remove(node);
+        return true;
+    }
+
+    /// <summary>The object standing in for an optional section that is off, made on first use.</summary>
+    private object? Detached(SchemaNode node)
+    {
+        if (_detached.TryGetValue(node, out object? existing)) return existing;
+
+        try
+        {
+            object? created = Activator.CreateInstance(node.MemberType);
+            if (created != null) _detached[node] = created;
+            return created;
+        }
+        catch (Exception exception)
+        {
+            LoggerUtil.Verbose(_api, this, $"Could not create '{node.Path}' ({node.MemberType.Name}): {exception.Message}");
+            return null;
+        }
+    }
+
+    private static object? ReadMember(MemberInfo member, object owner) => member switch
+    {
+        PropertyInfo property => property.CanRead ? property.GetValue(owner) : null,
+        FieldInfo field => field.GetValue(owner),
+        _ => null
+    };
+
+    private static bool WriteMember(MemberInfo member, object owner, object? value)
+    {
+        switch (member)
+        {
+            case PropertyInfo property when property.CanWrite: property.SetValue(owner, value); return true;
+            case FieldInfo field when !field.IsInitOnly: field.SetValue(owner, value); return true;
+            default: return false;
+        }
     }
 
     /// <summary>
@@ -896,25 +1057,20 @@ public sealed class Config : IConfig, IDisposable
     {
         if (owner == null) return null;
 
-        object? value = node.Member switch
-        {
-            PropertyInfo property => property.CanRead ? property.GetValue(owner) : null,
-            FieldInfo field => field.GetValue(owner),
-            _ => null
-        };
-
+        object? value = ReadMember(node.Member, owner);
         if (value != null) return value;
+
+        // An optional section that is off. Its rows still need an object to read defaults
+        // from and to hold edits until the switch goes on, but that object stays out of the
+        // author's config until then - attaching it is exactly what turned the feature on.
+        if (node.Optional) return Detached(node);
 
         try
         {
             value = Activator.CreateInstance(node.MemberType);
             if (value == null) return null;
 
-            switch (node.Member)
-            {
-                case PropertyInfo property when property.CanWrite: property.SetValue(owner, value); break;
-                case FieldInfo field when !field.IsInitOnly: field.SetValue(owner, value); break;
-            }
+            WriteMember(node.Member, owner, value);
         }
         catch (Exception exception)
         {
@@ -1528,7 +1684,18 @@ public sealed class Config : IConfig, IDisposable
         JsonObject config = new(JObject.Parse(defaultJson));
         foreach (ConfigSetting setting in settings.Where(item => !onlyClientSide || item.ClientSide))
         {
+            // A section switched off is written as null, and the rows under it are not
+            // written at all - writing them would recreate the object the null stands for.
+            if (IsSwitchedOff(setting)) continue;
+
             JsonObjectPath jsonPath = new(setting.YamlCode);
+
+            if (setting.Node is { Kind: SchemaKind.Object })
+            {
+                WriteSection(config, jsonPath, setting.Value.AsBool());
+                continue;
+            }
+
             JsonObject stored = StoredForm(setting, setting.Value);
 
             // SetOrCreate rather than Set: on a config file written before this setting
@@ -1555,9 +1722,25 @@ public sealed class Config : IConfig, IDisposable
         JsonObject jsonConfigObject = new(JObject.Parse(json));
         foreach (ConfigSetting setting in settings.Where(item => !onlyClientSide || item.ClientSide))
         {
-            ApplyStored(setting, ReadStoredValue(jsonConfigObject, setting) ?? setting.DefaultValue);
+            ApplyStored(setting, ReadStored(jsonConfigObject, setting) ?? setting.DefaultValue);
         }
         return true;
+    }
+
+    /// <summary>
+    /// An optional section in the file: null when off, and when on an object for its rows
+    /// to be written into - a fresh one only if the path does not hold one already.
+    /// </summary>
+    private static void WriteSection(JsonObject config, JsonObjectPath path, bool on)
+    {
+        if (!on)
+        {
+            path.SetOrCreate(config, new JsonObject(JValue.CreateNull()));
+            return;
+        }
+
+        JsonObject? existing = path.Get(config).FirstOrDefault((JsonObject?)null);
+        if (existing?.Token is not JObject) path.SetOrCreate(config, new JsonObject(new JObject()));
     }
 
     private void ParseConstants(Dictionary<string, ConfigSetting> settings, JsonObject constants)
