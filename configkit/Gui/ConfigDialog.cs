@@ -65,6 +65,8 @@ public class ConfigDialog : GuiDialog
     /// The control built for each setting, kept because container children are not
     /// reachable through the composer by key.
     private readonly Dictionary<string, GuiElement> _widgets = new();
+    /// <summary>Each row's label beside its control, so a row's extent includes both.</summary>
+    private readonly Dictionary<string, (GuiElementDynamicText label, CairoFont font)> _labels = new();
 
     /// The readout beside each slider. Kept separately from _widgets because it is not the
     /// control for the setting, it only reports it.
@@ -170,18 +172,33 @@ public class ConfigDialog : GuiDialog
     public IReadOnlyDictionary<string, ConfigSetting> RenderedSettings => _settingsByKey;
 
     /// <summary>
-    /// Where each rendered control sits and how tall it is, top to bottom. Rows are laid out
-    /// by advancing a y cursor, so a control taller than the step it advances by silently
-    /// overlaps the row beneath it - which is invisible to every test that only asks whether
-    /// a row exists.
+    /// Where each rendered row sits and how tall it is, top to bottom - its control, and its
+    /// label's text if that reaches further down. Rows are laid out by advancing a y cursor,
+    /// so a control taller than the step it advances by, or a label that wraps past it,
+    /// silently overlaps the row beneath it - which is invisible to every test that only asks
+    /// whether a row exists.
     /// </summary>
     public IReadOnlyList<(string Code, double Y, double Height)> RowGeometry
         => _settingsByKey
             .Where(entry => _widgets.ContainsKey(entry.Key))
-            .Select(entry => (
-                entry.Value.YamlCode,
-                _widgets[entry.Key].Bounds.fixedY,
-                _widgets[entry.Key].Bounds.fixedHeight))
+            .Select(entry =>
+            {
+                ElementBounds control = _widgets[entry.Key].Bounds;
+                double bottom = control.fixedY + control.fixedHeight;
+
+                // The label's text, not its box: the box is padded to a full row for a
+                // one-line label, and the text is what a player sees drawn over the row
+                // below. Measured here from the element rather than taken from the row's
+                // own arithmetic, so the test does not agree with the layout by definition.
+                if (_labels.TryGetValue(entry.Key, out (GuiElementDynamicText label, CairoFont font) drawn))
+                {
+                    double text = capi.Gui.Text.GetMultilineTextHeight(drawn.font, drawn.label.GetText(),
+                        drawn.label.Bounds.fixedWidth);
+                    bottom = Math.Max(bottom, drawn.label.Bounds.fixedY + text);
+                }
+
+                return (entry.Value.YamlCode, control.fixedY, bottom - control.fixedY);
+            })
             .OrderBy(entry => entry.fixedY)
             .ToList();
 
@@ -856,12 +873,21 @@ public class ConfigDialog : GuiDialog
 
             string key = $"setting-{index++}";
 
+            // Two different reasons a row cannot be edited, and they read differently: one
+            // says the server owns it, the other that nothing owns it.
+            bool serverOwned = IsServerControlled(setting);
+            bool locked = serverOwned || setting.ReadOnly;
+            string labelText = serverOwned ? LabelFor(setting) + " (server)" : LabelFor(setting);
+
             // How tall this row is, decided before the measuring pass bails out. It used to
             // add RowHeight for every row regardless, which is right until a row is taller
             // than one line: the window was then sized for a raw-JSON row it had counted as
-            // an ordinary one, and clipped the box it had just made room for.
+            // an ordinary one, and clipped the box it had just made room for. The label
+            // counts too - one that wraps grows the row, not just its own box.
             bool isContainer = setting.Node is { Kind: SchemaKind.Dictionary or SchemaKind.List };
-            double rowHeight = isContainer ? RowHeight : ControlHeight(setting);
+            double controlHeight = isContainer ? RowHeight : ControlHeight(setting);
+            double labelOverflow = LabelOverflow(labelText);
+            double rowHeight = controlHeight + labelOverflow;
 
             if (container == null)
             {
@@ -869,20 +895,14 @@ public class ConfigDialog : GuiDialog
                 continue;
             }
 
-            // Two different reasons a row cannot be edited, and they read differently: one
-            // says the server owns it, the other that nothing owns it.
-            bool serverOwned = IsServerControlled(setting);
-            bool locked = serverOwned || setting.ReadOnly;
-            string labelText = serverOwned ? LabelFor(setting) + " (server)" : LabelFor(setting);
-
             if (isContainer)
             {
                 // One row, whatever is inside it. A dictionary's contents are unbounded and
                 // its entries need a different set of columns than a setting row has.
                 _settingsByKey[key] = setting;
 
-                ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, rowHeight - 4);
-                AddLabel(container, labelText, setting.Comment, y, controlBounds.fixedHeight, locked);
+                ElementBounds controlBounds = ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, RowHeight - 4);
+                _labels[key] = AddLabel(container, labelText, setting.Comment, y, controlBounds.fixedHeight, locked);
 
                 ConfigSetting owner = setting;
                 SchemaNode owned = setting.Node!;
@@ -899,8 +919,8 @@ public class ConfigDialog : GuiDialog
             }
             else
             {
-                AddSettingRow(container, key, setting, labelText, setting.Comment, y, rowHeight, locked,
-                    () => OnResetSetting(setting, key), $"Restore this setting to {DefaultText(setting)}");
+                AddSettingRow(container, key, setting, labelText, setting.Comment, y, controlHeight, labelOverflow,
+                    locked, () => OnResetSetting(setting, key), $"Restore this setting to {DefaultText(setting)}");
             }
 
             y += rowHeight + RowGap;
@@ -1108,8 +1128,10 @@ public class ConfigDialog : GuiDialog
 
         // A managed (POCO) config labels each setting "<domain>:setting-<FieldName>", which
         // Lang returns unchanged when the mod ships no translation for it. Showing a player
-        // "mymod:setting-MaxRadius" is worse than showing "Max radius".
-        if (string.IsNullOrWhiteSpace(label) || IsUntranslatedLangKey(label!))
+        // "mymod:setting-MaxRadius" is worse than showing "Max radius". The setting knows
+        // whether that happened; guessing it from the text here is what let a domain with
+        // spaces in it put the raw key on every row.
+        if (string.IsNullOrWhiteSpace(label) || setting.LabelIsKey)
         {
             // The last segment only. A nested setting's code is a path, and a row reading
             // "Rain collector/litres per hour" repeats what its own heading already says.
@@ -1121,9 +1143,6 @@ public class ConfigDialog : GuiDialog
 
         return label!;
     }
-
-    private static bool IsUntranslatedLangKey(string label)
-        => label.Contains(':') && !label.Contains(' ');
 
     /// <summary>"MaxClientViewDistance" -> "Max client view distance".</summary>
     private static string Humanize(string code) => SchemaBuilder.Humanize(code);
@@ -1241,20 +1260,22 @@ public class ConfigDialog : GuiDialog
     /// had none of them.
     /// </summary>
     private void AddSettingRow(GuiElementContainer container, string key, ConfigSetting setting, string labelText,
-        string? comment, double y, double rowHeight, bool locked, Action? onReset, string? resetHint)
+        string? comment, double y, double controlHeight, double labelOverflow, bool locked, Action? onReset,
+        string? resetHint)
     {
         // Raw JSON is a document, not a value: it gets the label's own line and then the
         // full width of the row beneath it. In the control column it had 250px, which is
-        // the width of a slider and no use at all for reading JSON.
+        // the width of a slider and no use at all for reading JSON. A label that wraps
+        // pushes the box down by the lines it adds, rather than being drawn over it.
         bool document = setting.SettingType == ConfigSettingType.Other;
 
         ElementBounds controlBounds = document
-            ? ElementBounds.Fixed(0, y + RowHeight, RowWidth, rowHeight - RowHeight - 4)
-            : ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, rowHeight - 4);
+            ? ElementBounds.Fixed(0, y + RowHeight + labelOverflow, RowWidth, controlHeight - RowHeight - 4)
+            : ElementBounds.Fixed(LabelWidth + 16, y, ControlWidth, controlHeight - 4);
 
         // A document row's label heads its box rather than sitting beside a control, so
         // its baseline comes from one line's worth rather than the whole tall row.
-        (GuiElementDynamicText label, CairoFont labelFont) = AddLabel(container, labelText, comment, y,
+        (GuiElementDynamicText label, CairoFont labelFont) = _labels[key] = AddLabel(container, labelText, comment, y,
             document ? RowHeight : controlBounds.fixedHeight, locked);
 
         if (locked)
@@ -1271,13 +1292,15 @@ public class ConfigDialog : GuiDialog
         if (onReset != null) AddResetButton(container, y, onReset, resetHint ?? "Restore this to its default");
     }
 
+    /// <summary>The label's font. Locked rows differ only in colour, so both measure the same.</summary>
+    private static CairoFont LabelFont(bool locked)
+        => locked ? CairoFont.WhiteSmallText().WithColor(GuiStyle.ColorParchment) : CairoFont.WhiteSmallText();
+
     /// <summary>A row's label on the row's baseline, with its comment as a tooltip.</summary>
     private (GuiElementDynamicText label, CairoFont font) AddLabel(GuiElementContainer container, string text,
         string? comment, double y, double controlHeight, bool locked)
     {
-        CairoFont font = locked
-            ? CairoFont.WhiteSmallText().WithColor(GuiStyle.ColorParchment)
-            : CairoFont.WhiteSmallText();
+        CairoFont font = LabelFont(locked);
 
         ElementBounds bounds = OnBaseline(text, font, Baseline(font, y, controlHeight),
             LabelIndent, LabelWidth - LabelIndent);
@@ -1399,6 +1422,28 @@ public class ConfigDialog : GuiDialog
         return ElementBounds.Fixed(x, baseline - font.GetFontExtents().Ascent, width,
             Math.Max(RowHeight, height));
     }
+
+    /// <summary>
+    /// What a wrapped label adds to its row's height: nothing for one that fits its line,
+    /// and the lines beyond the first for one that does not.
+    ///
+    /// The label grows downward from the row's baseline, as OnBaseline says, but the row
+    /// was sized from its control alone - so a three-line label drew over the two rows
+    /// beneath it. A player who saw it had passed a display name as a domain, which put a
+    /// long untranslated key on every row; a long [DisplayName] does the same on its own.
+    /// The control keeps its height and stays on the first line; only the row grows.
+    /// </summary>
+    private double LabelOverflow(string text)
+    {
+        CairoFont font = LabelFont(locked: false);
+        double top = Baseline(font, 0, RowHeight - 4) - font.GetFontExtents().Ascent;
+        double height = capi.Gui.Text.GetMultilineTextHeight(font, text, LabelWidth - LabelIndent);
+
+        return Math.Max(0, top + height + LabelBottomGap - RowHeight);
+    }
+
+    /// <summary>Room between the last line of a wrapped label and the row beneath it.</summary>
+    private const double LabelBottomGap = 4;
 
     private void Remember(string key, GuiElementContainer container, GuiElement element)
     {
@@ -1920,7 +1965,9 @@ public class ConfigDialog : GuiDialog
             // definition its member would have had there - so it is measured and drawn
             // the same way, tall raw-JSON rows included.
             ConfigSetting? setting = opens ? null : EntrySetting(frame, child.Code, value, child, child.Code);
-            double rowHeight = setting == null ? RowHeight : ControlHeight(setting);
+            double controlHeight = setting == null ? RowHeight : ControlHeight(setting);
+            double labelOverflow = LabelOverflow(label);
+            double rowHeight = controlHeight + labelOverflow;
 
             if (container == null)
             {
@@ -1948,7 +1995,8 @@ public class ConfigDialog : GuiDialog
             }
             else
             {
-                AddSettingRow(container, key, setting, label, child.Comment, y, rowHeight, frame.Locked, reset, hint);
+                AddSettingRow(container, key, setting, label, child.Comment, y, controlHeight, labelOverflow,
+                    frame.Locked, reset, hint);
             }
 
             y += rowHeight + RowGap;
@@ -1961,6 +2009,7 @@ public class ConfigDialog : GuiDialog
     private void ClearRowState()
     {
         _widgets.Clear();
+        _labels.Clear();
         _sliderValues.Clear();
         _errorMarks.Clear();
         _keyWidgets.Clear();

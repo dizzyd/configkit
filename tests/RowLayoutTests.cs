@@ -50,6 +50,29 @@ public class RowLayoutTests
         public string After = "last";
     }
 
+    /// <summary>
+    /// Labels that do not fit their line. The reported one was an untranslated key with a
+    /// display name passed as the domain - "Wear And Tear / Server / Auto Part Registry
+    /// Config:setting-Enabled" - which wrapped to three lines and was drawn over the two
+    /// rows beneath it. A long [Display(Name)] wraps the same way with no key involved.
+    /// </summary>
+    public class Wordy
+    {
+        public bool Before = true;
+
+        [System.ComponentModel.DataAnnotations.Display(
+            Name = "Whether the registry should also consider every part of the fruit press when it decides what wears")]
+        public bool IncludeFruitPress = true;
+
+        public int Between = 3;
+
+        [System.ComponentModel.DataAnnotations.Display(
+            Name = "The lowest proportion of metal a recipe's ingredients may have for its product to count as a metal part")]
+        public float MinimalMetalComposition = 0.8f;
+
+        public string After = "last";
+    }
+
     private static List<string> Overlaps(ConfigDialog dialog)
     {
         List<string> problems = [];
@@ -89,6 +112,74 @@ public class RowLayoutTests
             // The control that caused it is present, so this test is actually testing it.
             Assert.Equal("GuiElementTextArea", dialog.ControlKindFor("LegacyData"));
 
+            Assert.Equal("", string.Join("\n", Overlaps(dialog)));
+        }
+        finally
+        {
+            dialog.TryClose();
+        }
+    }
+
+    /// <summary>
+    /// A label that wraps makes its row taller, rather than running on into the next one.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    [SingleplayerOnly]
+    public async Task ALabelThatWrapsMakesItsRowTaller()
+    {
+        await OnClient();
+
+        Config config = new(Capi, "ckwordy", "Wordy", new Wordy(), "ck-wordy.json");
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { ["ckwordy"] = config });
+        dialog.TryOpen();
+        await Frames.Wait(8);
+
+        try
+        {
+            // The long names made it to the screen, so the rows being measured are the wide ones.
+            string labels = string.Join("\n", dialog.RenderedLabels);
+            Assert.Contains(labels, "Whether the registry should also consider");
+            Assert.Contains(labels, "The lowest proportion of metal");
+
+            Assert.Equal("", string.Join("\n", Overlaps(dialog)));
+
+            // And they were actually taller: a one-line row is RowHeight, and these are not.
+            IReadOnlyList<(string Code, double Y, double Height)> rows = dialog.RowGeometry;
+            double plain = rows.Single(row => row.Code == "Before").Height;
+            Assert.Greater(rows.Single(row => row.Code == "IncludeFruitPress").Height, plain,
+                "IncludeFruitPress's row against a one-line row");
+        }
+        finally
+        {
+            dialog.TryClose();
+        }
+    }
+
+    /// <summary>
+    /// The other half of that report. A domain with spaces in it - a display name passed
+    /// where the mod id goes - made every untranslated key look like a translated label to
+    /// the dialog's "has a colon and no space" test, so the raw key went on the row. The
+    /// setting knows whether its label was translated; the dialog is to ask it.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    [SingleplayerOnly]
+    public async Task AnUntranslatedKeyUnderASpacedDomainStillReadsAsTheMember()
+    {
+        await OnClient();
+
+        const string domain = "Wear And Tear / Wear And Tear / Server / Auto Part Registry Config";
+        Config config = new(Capi, domain, domain, new Awkward(), "ck-spaced.json");
+        ConfigDialog dialog = new(Capi, new Dictionary<string, Config> { [domain] = config });
+        dialog.TryOpen();
+        await Frames.Wait(8);
+
+        try
+        {
+            string labels = string.Join("\n", dialog.RenderedLabels);
+            Assert.Contains(labels, "Before");
+            Assert.False(labels.Contains(":setting-"), "a raw key on a row: " + labels);
             Assert.Equal("", string.Join("\n", Overlaps(dialog)));
         }
         finally

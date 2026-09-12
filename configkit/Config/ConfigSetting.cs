@@ -102,6 +102,14 @@ public class ConfigSetting : ISetting
     public Validation? Validation { get; internal set; }
     public float SortingWeight { get; internal set; }
     public string? InGui { get; internal set; }
+    /// <summary>
+    /// True when InGui is a "domain:key" that no language file translates, so the text is
+    /// the key itself rather than anything a player should read. Decided where the lookup
+    /// happens rather than inferred from the text afterwards: the dialog used to take "has a
+    /// colon and no space" as the sign of a key, and a domain with spaces in it defeated that
+    /// and put the raw key on every row.
+    /// </summary>
+    internal bool LabelIsKey { get; private set; }
     public bool Logarithmic { get; internal set; }
     public bool ClientSide { get; internal set; }
     /// <summary>Shown but not editable: [ReadOnly(true)], or a member with no way to assign it.</summary>
@@ -147,6 +155,7 @@ public class ConfigSetting : ISetting
         Validation = previous.Validation;
         SortingWeight = previous.SortingWeight;
         InGui = previous.InGui;
+        LabelIsKey = previous.LabelIsKey;
         Logarithmic = previous.Logarithmic;
         ClientSide = previous.ClientSide;
         SettingChanged = previous.SettingChanged;
@@ -580,6 +589,12 @@ public class ConfigSetting : ISetting
         if (token["value"] is not JToken value) return new JValue("<invalid>");
         return value;
     }
+    /// <summary>
+    /// A prefixed key with no translation behind it. Lang hands such a key back unchanged
+    /// from Get, which is the text the dialog would otherwise show.
+    /// </summary>
+    private static bool IsUntranslatedKey(string value) => value.Contains(':') && !Lang.HasTranslation(value);
+
     private static string Localize(string value, string domain)
     {
         bool hasDomain = value.Contains(':');
@@ -609,7 +624,11 @@ public class ConfigSetting : ISetting
             Link = json["link"].AsString(""),
         };
 
-        if (setting.InGui != null) setting.InGui = Localize(setting.InGui, domain);
+        if (setting.InGui != null)
+        {
+            setting.LabelIsKey = IsUntranslatedKey(setting.InGui);
+            setting.InGui = Localize(setting.InGui, domain);
+        }
         if (setting.Comment != null) setting.Comment = Localize(setting.Comment, domain);
 
         (string? mappingKey, JsonObject? value, Validation? validation) = Validation.FromJson(json, setting.Value.AsString());
