@@ -1,0 +1,8 @@
+[
+	{
+		"op": "replace",
+		"file": "vintageskavenrat:config/customplayermodels/skaven.json",
+		"path": "/skaven/Group",
+		"value": "beast"
+	}
+]

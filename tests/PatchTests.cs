@@ -62,6 +62,40 @@ public class PatchTests
         Assert.Equal(20, damage);   // 10 * 2, once
     }
 
+    /// <summary>
+    /// A server owner patching an asset that ConfigKit also patches. The json patch loader
+    /// runs at ExecuteOrder 0.05, after ConfigKit at 0.01, so on a client the second pass -
+    /// the one over the server's configs - used to restore bytes snapshotted before the
+    /// patch existed and revert it with nothing said in the log. Reported against the
+    /// Skaven/Rat player model mod, whose config patches the same file PlayerModelLib reads
+    /// a model's group from.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task AJsonPatchToAPatchedAssetSurvivesConfigKit()
+    {
+        await OnClient();
+
+        JsonObject asset = Asset("demomod:config/foreign.json");
+
+        Assert.Equal("from-a-json-patch", asset["serverOwned"].AsString(""));
+        Assert.Equal(21, asset["value"].AsInt());   // and ConfigKit's own patch still lands
+    }
+
+    /// <summary>
+    /// The two halves of the above together. Keeping the other writer's whole file as the
+    /// baseline would feed ConfigKit's own result back into "value * 2" and read 20; taking
+    /// only the paths ConfigKit owns back to what they held before it first wrote reads 10.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    [RequiresClient]
+    public async Task APatchRelativeToTheAssetsOwnValueDoesNotCompoundOnAJsonPatchedAsset()
+    {
+        await OnClient();
+
+        Assert.Equal(10, Asset("demomod:config/foreign.json")["relative"].AsInt());   // 5 * 2, once
+    }
+
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]
     public async Task AWildcardPatchHitsEveryMatchingAsset()

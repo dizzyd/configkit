@@ -308,7 +308,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         _guiManager = null;
 
         _configs.Clear();
-        AssetPatch.ForgetPristineAssets();
+        AssetPatch.ForgetAssetBaselines();
         _domains.Clear();
         {
         }

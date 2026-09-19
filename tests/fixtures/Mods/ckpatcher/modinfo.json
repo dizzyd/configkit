@@ -1,0 +1,9 @@
+{
+    "type": "content",
+    "modid": "ckpatcher",
+    "name": "ConfigKit Patcher Fixture",
+    "authors": [ "ConfigKit tests" ],
+    "description": "Stands in for a server owner's json patch against an asset ConfigKit also patches. Not shipped.",
+    "version": "1.0.0",
+    "dependencies": { "game": "1.22.0" }
+}

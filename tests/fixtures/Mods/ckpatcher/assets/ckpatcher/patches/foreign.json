@@ -1,0 +1,8 @@
+[
+	{
+		"op": "replace",
+		"file": "demomod:config/foreign.json",
+		"path": "/serverOwned",
+		"value": "from-a-json-patch"
+	}
+]

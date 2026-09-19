@@ -8,6 +8,7 @@
 
 using Newtonsoft.Json.Linq;
 using SimpleExpressionEngine;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
@@ -129,7 +130,12 @@ internal partial class AssetPatch
         IEnumerable<(JsonObject? asset, string path)> assets;
         if (_asset.StartsWith('@'))
         {
-            assets = RetrieveAssetsByWildcard();
+            // Materialised, not left lazy. The chain retrieves - and so restores the
+            // baseline of - every asset it touches, and it is walked twice below: once to
+            // count, once to patch. The second walk would find the assets holding their
+            // restored baseline rather than what ConfigKit last wrote, and take its own
+            // work for another writer's.
+            assets = RetrieveAssetsByWildcard().ToList();
             serverSideAsset = false;
 
             _api.Logger.VerboseDebug($"[ConfigKit] Retrieved {assets.Count()} assets by wildcard '{_asset}'.");
@@ -194,16 +200,37 @@ internal partial class AssetPatch
         JsonObject? asset = RetrieveAsset(path, out bool serverSide);
         return (serverSide, asset, path);
     }
+    /// <summary>What an asset looked like before ConfigKit patched it, and what ConfigKit
+    /// last wrote over it.</summary>
+    private sealed class AssetBaseline
+    {
+        public byte[] Pristine = [];
+        public byte[] Written = [];
+    }
+
     /// <summary>
-    /// The bytes each asset had before ConfigKit first touched it.
+    /// The bytes each asset had before ConfigKit patched it.
     ///
     /// Patches rewrite IAsset.Data in place, and patching runs more than once on a client -
     /// once over the locally parsed configs and again when the server's configs arrive. A
     /// formula written against the asset's own value ("value * 2") therefore compounded, so
-    /// a x2 multiplier silently became x4. Every application starts from the pristine bytes
+    /// a x2 multiplier silently became x4. Every application starts from the baseline bytes
     /// instead, which makes patching idempotent however often it runs.
+    ///
+    /// The baseline is not fixed for the session: it is rebased whenever the asset no longer
+    /// holds what ConfigKit last wrote, because that means someone else has written to it -
+    /// the json patch loader at ExecuteOrder 0.05, or another mod. Restoring the whole file
+    /// over their bytes would silently revert their work, which is how a server owner's json
+    /// patch to a modded asset went missing with no word in the log. Their file becomes the
+    /// baseline, with only the paths this patch owns taken back to what they held before
+    /// ConfigKit first wrote - keeping their version of those too would feed ConfigKit's own
+    /// result into a formula written against the asset's value, and "value * 2" would
+    /// compound after all.
+    ///
+    /// Keyed by the asset object, not its path, so the two sides of a singleplayer session
+    /// keep their own baselines - a json patch can be conditional on side.
     /// </summary>
-    private static readonly Dictionary<string, byte[]> _pristineAssets = new();
+    private static readonly ConditionalWeakTable<IAsset, AssetBaseline> _baselines = new();
 
     private JsonObject? RetrieveAsset(string path, out bool serverSide)
     {
@@ -220,7 +247,7 @@ internal partial class AssetPatch
         try
         {
             asset = _api.Assets.Get(path);
-            RestorePristine(asset, path);
+            RestoreBaseline(asset, path);
         }
         catch
         {
@@ -230,7 +257,13 @@ internal partial class AssetPatch
 
         if (asset == null) return null;
 
-        string json = Asset.BytesToString(asset.Data);
+        return ParseJson(asset.Data);
+    }
+
+    /// <summary>An asset's bytes as json, array or object, or null if they are neither.</summary>
+    private static JsonObject? ParseJson(byte[] data)
+    {
+        string json = Asset.BytesToString(data);
 
         try
         {
@@ -249,34 +282,99 @@ internal partial class AssetPatch
         }
     }
 
-    private static void RestorePristine(IAsset? asset, string path)
+    private void RestoreBaseline(IAsset? asset, string path)
     {
         if (asset?.Data == null) return;
 
-        lock (_pristineAssets)
+        lock (_baselines)
         {
-            if (_pristineAssets.TryGetValue(path, out byte[]? original))
+            if (!_baselines.TryGetValue(asset, out AssetBaseline? baseline))
             {
-                asset.Data = (byte[])original.Clone();
+                // First sight of this asset. What it holds now is what it held before.
+                _baselines.AddOrUpdate(asset, new AssetBaseline { Pristine = (byte[])asset.Data.Clone() });
+                return;
             }
-            else
+
+            if (baseline.Written.AsSpan().SequenceEqual(asset.Data))
             {
-                _pristineAssets[path] = (byte[])asset.Data.Clone();
+                asset.Data = (byte[])baseline.Pristine.Clone();
+                return;
             }
+
+            baseline.Pristine = Rebase(baseline.Pristine, asset.Data) ?? (byte[])asset.Data.Clone();
+            baseline.Written = [];
+            asset.Data = (byte[])baseline.Pristine.Clone();
+
+            _api.Logger.VerboseDebug($"[ConfigKit] Asset '{path}' has been written to by something else since ConfigKit last patched it. Keeping that version and rebasing onto it.");
         }
     }
 
-    /// <summary>Forgets the pristine copies. Assets are reloaded with the world.</summary>
-    internal static void ForgetPristineAssets()
+    /// <summary>
+    /// Someone else's version of the asset, with every path this patch owns taken back to
+    /// what the old baseline held. Null if either version will not parse, which leaves the
+    /// caller to keep theirs whole.
+    /// </summary>
+    private byte[]? Rebase(byte[] pristine, byte[] foreign)
     {
-        lock (_pristineAssets) _pristineAssets.Clear();
+        try
+        {
+            JsonObject? before = ParseJson(pristine);
+            JsonObject? after = ParseJson(foreign);
+
+            if (before == null || after == null) return null;
+
+            foreach (IValuePatch patch in _patches)
+            {
+                JsonObject[] original = patch.Nodes(before).ToArray();
+                JsonObject[] live = patch.Nodes(after).ToArray();
+
+                // Paired by position. A foreign patch that added the node ConfigKit patches
+                // leaves nothing to take it back to, and one that removed it leaves nothing
+                // to write into; both are right to skip.
+                for (int index = 0; index < Math.Min(original.Length, live.Length); index++)
+                {
+                    JToken? held = original[index].Token?.DeepClone();
+                    if (held == null) continue;
+
+                    live[index].Token?.Replace(held);
+                }
+            }
+
+            string? rebased = after.ToString();
+
+            return rebased == null ? null : System.Text.Encoding.UTF8.GetBytes(rebased);
+        }
+        catch (Exception exception)
+        {
+            _api.Logger.VerboseDebug($"[ConfigKit] Failed to rebase patches onto another writer's version of an asset: {exception}");
+            return null;
+        }
+    }
+
+    /// <summary>Remembers what was written, so a later pass can tell ConfigKit's own bytes
+    /// from someone else's.</summary>
+    private static void RecordWritten(IAsset asset, byte[] bytes)
+    {
+        lock (_baselines)
+        {
+            if (_baselines.TryGetValue(asset, out AssetBaseline? baseline)) baseline.Written = bytes;
+        }
+    }
+
+    /// <summary>Forgets the baselines. Assets are reloaded with the world.</summary>
+    internal static void ForgetAssetBaselines()
+    {
+        lock (_baselines) _baselines.Clear();
     }
 
     private void StoreAsset(JsonObject data, string path)
     {
         IAsset? asset = _api.Assets.Get(path);
         if (asset == null) return;
-        asset.Data = System.Text.Encoding.UTF8.GetBytes(data.ToString());
+
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(data.ToString());
+        asset.Data = bytes;
+        RecordWritten(asset, bytes);
     }
 
     private static readonly Regex _booleanExpressionRegex = GetBooleanExpressionRegex();
@@ -435,6 +533,10 @@ internal partial class AssetPatch
 internal interface IValuePatch
 {
     int Apply(JsonObject asset);
+
+    /// <summary>The nodes of this asset the patch writes to - the paths it owns.</summary>
+    IEnumerable<JsonObject> Nodes(JsonObject asset);
+
     string Path { get; }
 }
 
@@ -482,9 +584,11 @@ internal sealed class NumberPatch : IValuePatch
         _returnType = type;
     }
 
+    public IEnumerable<JsonObject> Nodes(JsonObject asset) => _path.Get(asset);
+
     public int Apply(JsonObject asset)
     {
-        IEnumerable<JsonObject> jsonValues = _path.Get(asset);
+        IEnumerable<JsonObject> jsonValues = Nodes(asset);
         jsonValues.Foreach(ApplyToOne);
         return jsonValues.Count();
     }
@@ -530,9 +634,11 @@ internal sealed class BooleanPatch : IValuePatch
         _context = context;
     }
 
+    public IEnumerable<JsonObject> Nodes(JsonObject asset) => _path.Get(asset);
+
     public int Apply(JsonObject asset)
     {
-        IEnumerable<JsonObject> jsonValues = _path.Get(asset);
+        IEnumerable<JsonObject> jsonValues = Nodes(asset);
         jsonValues.Foreach(ApplyToOne);
         return jsonValues.Count();
     }
@@ -563,9 +669,11 @@ internal sealed class StringPatch : IValuePatch
         _value = config.GetSetting(value)?.Value.AsString() ?? value;
     }
 
+    public IEnumerable<JsonObject> Nodes(JsonObject asset) => _path.Get(asset);
+
     public int Apply(JsonObject asset)
     {
-        IEnumerable<JsonObject> jsonValues = _path.Get(asset);
+        IEnumerable<JsonObject> jsonValues = Nodes(asset);
         jsonValues.Foreach(ApplyToOne);
         return jsonValues.Count();
     }
@@ -588,9 +696,11 @@ internal sealed class JsonPatch : IValuePatch
         _value = config.GetSetting(value)?.Value;
     }
 
+    public IEnumerable<JsonObject> Nodes(JsonObject asset) => _path.Get(asset);
+
     public int Apply(JsonObject asset)
     {
-        IEnumerable<JsonObject> jsonValues = _path.Get(asset);
+        IEnumerable<JsonObject> jsonValues = Nodes(asset);
         jsonValues.Foreach(ApplyToOne);
         return jsonValues.Count();
     }
@@ -614,9 +724,11 @@ internal sealed class ConstPatch : IValuePatch
         _value = value;
     }
 
+    public IEnumerable<JsonObject> Nodes(JsonObject asset) => _path.Get(asset);
+
     public int Apply(JsonObject asset)
     {
-        IEnumerable<JsonObject> jsonValues = _path.Get(asset);
+        IEnumerable<JsonObject> jsonValues = Nodes(asset);
         jsonValues.Foreach(ApplyToOne);
         return jsonValues.Count();
     }

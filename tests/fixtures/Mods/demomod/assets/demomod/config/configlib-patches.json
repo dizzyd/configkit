@@ -75,6 +75,10 @@
       },
       "demomod:config/arrayed.json": {
         "items/-/v": "patchNumber"
+      },
+      "demomod:config/foreign.json": {
+        "value": "patchNumber",
+        "relative": "value * 2"
       }
     },
     "boolean": {
