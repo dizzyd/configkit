@@ -310,8 +310,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         _configs.Clear();
         AssetPatch.ForgetAssetBaselines();
         _domains.Clear();
-        {
-        }
+        ConfigRegistry.OnToBytes -= StopRegistering;
         if (_api?.Side == EnumAppSide.Client)
         {
             ConfigRegistry.ConfigsLoaded -= ReloadConfigs;
@@ -465,8 +464,9 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
             _configsToRegister.Clear();
         }
 
-        ConfigRegistry.OnToBytes += () => _canRegisterNewConfig = false;
+        ConfigRegistry.OnToBytes += StopRegistering;
     }
+    private void StopRegistering() => _canRegisterNewConfig = false;
     private void LoadConfig(IAsset asset, ConfigRegistry? registry)
     {
         if (_api == null) return;
