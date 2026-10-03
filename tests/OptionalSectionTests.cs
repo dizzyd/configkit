@@ -87,6 +87,7 @@ public class OptionalSectionTests
 
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]
+    [SingleplayerOnly]
     public async Task TheSwitchAttachesAndDetachesTheObject()
     {
         await OnClient();
@@ -118,6 +119,7 @@ public class OptionalSectionTests
 
     [VsTest(TimeoutMs = 60000)]
     [RequiresClient]
+    [SingleplayerOnly]
     public async Task TheFileDecidesTheSwitch()
     {
         await OnClient();

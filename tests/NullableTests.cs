@@ -256,6 +256,7 @@ public class NullableTests
     /// untouched config was not already corrupted.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task ANullSurvivesWritingAndReadingBack()
     {
         await OnServer();
@@ -281,6 +282,7 @@ public class NullableTests
     /// through the whole chain rather than only in the setting.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task AValueAndThenANullBothReachTheObject()
     {
         await OnServer();
@@ -309,6 +311,7 @@ public class NullableTests
     /// load. Not a settings screen missing a row: no mod.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task ANullableEnumWithNoValueDoesNotBreakRegistration()
     {
         await OnServer();

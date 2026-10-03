@@ -21,6 +21,7 @@ using static VsTestkit.Testing.Vs;
 /// throwaway mod system through the same load and dispose the real one goes through. It loads
 /// into a registry of its own, so nothing it registers reaches the live one.
 /// </summary>
+[SingleplayerOnly]
 public class LifecycleLeakTests
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;

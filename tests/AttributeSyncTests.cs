@@ -22,6 +22,7 @@ using static VsTestkit.Testing.Vs;
 /// The null cannot be carried, so the key is left out. The config file keeps it; only this
 /// event copy drops it.
 /// </summary>
+[SingleplayerOnly]
 public class AttributeSyncTests
 {
     public class WithNulls

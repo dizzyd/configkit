@@ -77,6 +77,7 @@ public class ValidationTests
     /// and the bound still did nothing.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task AnOpenRangeBoundStillRejectsANegative()
     {
         await OnServer();
@@ -100,6 +101,7 @@ public class ValidationTests
 
     /// <summary>The author's own message, not one this library invented.</summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task TheMessageIsTheOneTheAuthorWrote()
     {
         await OnServer();
@@ -117,6 +119,7 @@ public class ValidationTests
     /// that cannot be faked by special-casing the handful of attributes in the BCL.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task ACustomValidatorRuns()
     {
         await OnServer();
@@ -138,6 +141,7 @@ public class ValidationTests
     /// inside the GUI's event handling. It is reported rather than allowed to escape.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task AValidatorThatThrowsIsReportedNotPropagated()
     {
         await OnServer();
@@ -157,6 +161,7 @@ public class ValidationTests
     /// have become slower or noisier.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task AGoodConfigReportsNothing()
     {
         await OnServer();

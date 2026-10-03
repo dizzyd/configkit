@@ -81,6 +81,7 @@ public class DocsAndFormatTests
     /// documents everything and annotates nothing got no tooltips at all.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task ADocCommentBecomesTheTooltip()
     {
         await OnServer();
@@ -110,6 +111,7 @@ public class DocsAndFormatTests
     /// happens. The point of the fallback is that it is free when unavailable.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task NoDocumentationFileCostsNothing()
     {
         await OnServer();
@@ -127,6 +129,7 @@ public class DocsAndFormatTests
     /// be read in the source, and a class carrying both means the author chose.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task AnExplicitDescriptionOutranksTheDocComment()
     {
         await OnServer();
@@ -293,6 +296,7 @@ public class DocsAndFormatTests
     /// Anything new goes on a method of its own, as SetConfigDisplayName did.
     /// </summary>
     [VsTest(TimeoutMs = 60000)]
+    [SingleplayerOnly]
     public async Task TheRegistrationSignatureDoesNotDrift()
     {
         await OnServer();
