@@ -294,6 +294,11 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     public override double ExecuteOrder() => 0.01;
     public override void Dispose()
     {
+        // Static, so whatever another mod subscribed outlives the world it subscribed in -
+        // its old mod system stays reachable and is invoked again by the next world opened.
+        // Nobody unsubscribes from an obsolete event, so drop them all here.
+        ConfigsChanged = null;
+
         if (_api?.Side == EnumAppSide.Client)
         {
             PauseMenuPatch.Unpatch();
