@@ -151,16 +151,34 @@ public class ConfigDialog : GuiDialog
 
     public override string ToggleKeyCombinationCode => "configkitconfigs";
 
+    // The pause menu draws at 0.89 and receives input at 0. Keep it open so the
+    // world stays paused, but put settings ahead of it for both drawing and clicks.
+    public override double DrawOrder => 0.9;
+    public override double InputOrder => -0.1;
+
     /// <summary>
     /// While this window is open, the keyboard belongs to it.
     ///
     /// Without this the game still reads movement keys underneath: typing a block code into
     /// a setting walked the player forwards, and W or S with nothing focused walked them
-    /// around behind the window. Escape is exempt by the engine, so the window can always be
-    /// closed - and the toggle hotkey now types its own letter into a focused field rather
-    /// than closing, which is the right trade for a screen full of text boxes.
+    /// around behind the window. Escape closes just this window, and the toggle hotkey
+    /// types its own letter into a focused field rather than closing, which is the right
+    /// trade for a screen full of text boxes.
     /// </summary>
     public override bool CaptureAllInputs() => true;
+
+    public override void OnKeyDown(KeyEvent args)
+    {
+        base.OnKeyDown(args);
+
+        // An unhandled Escape reaches the pause menu (or the engine's close-all
+        // pass), resuming the world underneath settings. Consume it here so closing
+        // settings returns to the still-paused menu, just like the titlebar's X.
+        if (!args.Handled && IsOpened() && args.KeyCode == (int)GlKeys.Escape)
+        {
+            args.Handled = TryClose();
+        }
+    }
 
     /// <summary>The configs this window is showing, keyed by mod domain.</summary>
     public IReadOnlyDictionary<string, Config> Configs => _configs;
