@@ -10,11 +10,13 @@ using ConfigKit.Gui;
 using ConfigKit.Patches;
 using Newtonsoft.Json.Linq;
 using ProtoBuf;
+using System.Reflection;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
 using Vintagestory.API.Datastructures;
 using Vintagestory.API.Server;
+using Vintagestory.Client.NoObf;
 using Vintagestory.Common;
 
 namespace ConfigKit;
@@ -30,7 +32,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
 
         // Accepting a registration while dormant would leave the caller believing its
         // settings are managed when nothing will ever sync or display them.
-        if (_standingDown)
+        if (StandingDown)
         {
             LoggerUtil.Notify(_api, this, $"Not registering '{domain}': ConfigKit has stood down in favour of another config mod.");
             return;
@@ -195,13 +197,23 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     private IServerNetworkChannel? _eventsServerChannel;
     private const string _channelName = "configkit:events";
     private bool _canRegisterNewConfig = true;
-    private bool _standingDown;
+    private string[] _incumbents = [];
+    private bool StandingDown => _incumbents.Length > 0;
+    private bool _leaving;
     private ConfigGuiManager? _guiManager;
 
     public override void StartPre(ICoreAPI api)
     {
         _api = api;
-        _standingDown = StandDown(api);
+        _incumbents = Incumbents(api);
+
+        if (StandingDown)
+        {
+            api.Logger.Notification(_incumbents.Length == 1
+                ? "[ConfigKit] standing down: {0} is installed and already manages mod configs. Remove it to let ConfigKit take over."
+                : "[ConfigKit] standing down: {0} are installed and already manage mod configs. Remove them to let ConfigKit take over.",
+                IncumbentNames);
+        }
 
         // Read even while standing down: it costs nothing, and it means the file exists to be
         // found by someone whose first encounter with ConfigKit is a conflict.
@@ -213,23 +225,27 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     /// the same <c>configlib-patches.json</c> assets. Two owners for one file is worse than
     /// none, so defer to whichever was already installed rather than compete with it.
     /// </summary>
-    private static bool StandDown(ICoreAPI api)
-    {
-        string[] incumbents = new[] { "configlib", "autoconfiglib" }
-            .Where(api.ModLoader.IsModEnabled)
-            .ToArray();
+    private static string[] Incumbents(ICoreAPI api)
+        => new[] { "configlib", "autoconfiglib" }.Where(api.ModLoader.IsModEnabled).ToArray();
 
-        if (incumbents.Length == 0) return false;
-
-        api.Logger.Notification(
-            "[ConfigKit] standing down: {0} is installed and already manages mod configs. "
-          + "Remove it to let ConfigKit take over.", string.Join(" and ", incumbents));
-        return true;
-    }
+    private string IncumbentNames => string.Join(" and ", _incumbents);
 
     public override void Start(ICoreAPI api)
     {
-        if (_standingDown) return;
+        if (StandingDown)
+        {
+            // Each side stands down on its own mods, and a client keeps configlib even when
+            // the server lacks it, since configlib does not require the server. Its server
+            // can then be running ConfigKit and send its configs here. Without a registry
+            // to take them, the join died with a NullReferenceException in the game's own
+            // asset loading, which told the player nothing. So take them, and refuse.
+            if (api is ICoreClientAPI capi)
+            {
+                api.RegisterRecipeRegistry<RefusingConfigRegistry>(_registryCode).Received =
+                    quantity => RefuseServerConfigs(capi, quantity);
+            }
+            return;
+        }
 
         _registry = api.RegisterRecipeRegistry<ConfigRegistry>(_registryCode);
         api.Event.RegisterEventBusListener(ReloadJsonConfigs, filterByEventName: ConfigReloadEvent);
@@ -255,7 +271,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     }
     public override void AssetsLoaded(ICoreAPI api)
     {
-        if (_standingDown) return;
+        if (StandingDown) return;
 
         LoadConfigs();
         _api?.Logger.Notification($"[ConfigKit] Configs loaded: {_configs.Count}");
@@ -282,6 +298,72 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
 
         ConfigsLoaded?.Invoke();
         ConfigsChanged?.Invoke(api);
+    }
+
+    /// <summary>
+    /// The server runs ConfigKit and this client defers to configlib, so the server's
+    /// settings would not reach the mods here. They would run on their local files instead,
+    /// and disagree with the server without anything showing it. Leave the server with the
+    /// reason on the disconnect screen, as the game does for a missing mod.
+    /// </summary>
+    private void RefuseServerConfigs(ICoreClientAPI capi, int quantity)
+    {
+        if (_leaving) return;
+
+        // A server with nothing to sync has nothing to disagree about.
+        if (quantity == 0)
+        {
+            capi.Logger.Notification("[ConfigKit] The server runs ConfigKit but syncs no configs, so {0} can keep managing them here.", IncumbentNames);
+            return;
+        }
+
+        _leaving = true;
+        capi.Logger.Error("[ConfigKit] Leaving the server: it sent {0} config(s), and ConfigKit is standing down for {1}.", quantity, IncumbentNames);
+
+        string reason = $"This server uses ConfigKit for mod settings, but {IncumbentNames} {(_incumbents.Length == 1 ? "is" : "are")} installed in your game, "
+          + $"so ConfigKit cannot apply the server's settings. Remove {IncumbentNames} from your Mods folder to join this server.";
+        string exitReason = "configkit: server runs configkit, client stands down for " + IncumbentNames;
+
+        // Not from here: this runs in the middle of the game's asset loading, and ending the
+        // session there freed what loading went on to use - the client died natively a moment
+        // later. Poll until loading is over: its queue drained and the player's entity here.
+        // Not PlayerReadyFired, which a survival server holds back until a new player has made
+        // a character - they would have sat through that only to be sent away.
+        long listener = 0;
+        listener = capi.Event.RegisterGameTickListener(_ =>
+        {
+            if (capi.World is not ClientMain game) return;
+            if (game.GameLaunchTasks.Count > 0 || capi.World.Player?.Entity == null) return;
+
+            capi.Event.UnregisterGameTickListener(listener);
+
+            // And not from this listener either: it runs in the middle of a frame, and the
+            // frame's main thread tasks run after it against the disposed game. A task of our
+            // own, with the queue suspended behind it, is the last thing that frame does.
+            capi.Event.EnqueueMainThreadTask(() => Leave(game, reason, exitReason), "configkit-leave");
+        }, 100);
+    }
+
+    private void Leave(ClientMain game, string reason, string exitReason)
+    {
+        // The tasks queued behind this one still run once it returns, against a game that is
+        // gone - and right after loading those include texture uploads, one of which crashed
+        // the client. The game stops the queue when this is set, and once disposed it never
+        // runs what is left. Internal, hence reflection; the game's own kick does without,
+        // so if a version renames it we still leave, just without that guard.
+        FieldInfo? suspend = typeof(ClientMain).GetField("SuspendMainThreadTasks", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        if (suspend != null)
+        {
+            suspend.SetValue(game, true);
+        }
+        else
+        {
+            LoggerUtil.Warn(_api, this, "ClientMain.SuspendMainThreadTasks not found; leaving without holding back the main thread queue.");
+        }
+
+        game.disconnectReason = reason;
+        game.exitReason = exitReason;
+        game.DestroyGameSession(gotDisconnected: true, EnumExitMode.SoftExit);
     }
 
     private void BuildSettingsWindow(ICoreClientAPI clientApi)
@@ -421,7 +503,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         if (_api == null || string.IsNullOrWhiteSpace(domain)) return false;
 
         // Nothing is managed while dormant, and nothing listed is managed ever.
-        if (_standingDown || _unmanaged.Contains(domain)) return false;
+        if (StandingDown || _unmanaged.Contains(domain)) return false;
 
         // Already claimed - a registration, or an asset already read.
         if (_domains.Contains(domain)) return true;
