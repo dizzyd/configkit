@@ -144,6 +144,17 @@ public sealed class Config : IConfig, IDisposable
         }
     }
     public Config(ICoreAPI api, string domain, string modName, object configObject, string file)
+        : this(api, domain, modName, configObject, file, rewriteExisting: true)
+    {
+    }
+
+    /// <param name="rewriteExisting">
+    /// False leaves a file that already exists exactly as it is. An auto config is built over
+    /// a file the mod wrote and the player may have annotated - Newtonsoft reads comments in
+    /// JSON - and the values were just read from it, so rewriting it gains nothing and loses
+    /// the comments. The first save from the screen still rewrites it.
+    /// </param>
+    internal Config(ICoreAPI api, string domain, string modName, object configObject, string file, bool rewriteExisting)
     {
         _api = api;
         _domain = domain;
@@ -165,7 +176,7 @@ public sealed class Config : IConfig, IDisposable
             ParseJson(_json, out _settings, out _configBlocks, out _defaultJson, domain, Skeleton(configObject));
             _clientSideSettings = new(_settings);   // a copy: aliasing lets Clear() empty _settings
             _patches = new(api, this);
-            WriteToFile();
+            if (rewriteExisting || !File.Exists(ConfigFilePath)) WriteToFile();
             CreateFileWatcher();
             SubscribeToSettingsChanges();
         }
@@ -376,6 +387,22 @@ public sealed class Config : IConfig, IDisposable
             _api.Logger.Error($"Exception when trying to restore settings to defaults for '{_domain}' config.\nException: {exception}\n");
         }
     }
+    /// <summary>
+    /// Points this config at a new object of the same type, for a mod that has replaced the
+    /// one it registered - by loading its config again. The file is read first, so the new
+    /// object and the screen agree on what is in it; then every setting is assigned onto the
+    /// object, which on a multiplayer client includes the server's values.
+    /// </summary>
+    internal void Retarget(object target)
+    {
+        if (_configObject == null || ReferenceEquals(_configObject, target)) return;
+        if (_schema != null && !_schema.Root.IsInstanceOfType(target)) return;
+
+        _configObject = target;
+        ReadFromFile();
+        AssignSettingsValues(target);
+    }
+
     public void AssignSettingsValues(object target)
     {
         if (_schema != null && _schema.Root.IsInstanceOfType(target))
@@ -531,7 +558,7 @@ public sealed class Config : IConfig, IDisposable
     private readonly ConfigType _configType = ConfigType.YAML;
     private ConfigSchema? _schema;
     /// <summary>The object a managed config was built from, kept so a change can reach it.</summary>
-    private readonly object? _configObject;
+    private object? _configObject;
     private Dictionary<string, SchemaNode> _nodesByPath = [];
     private FileSystemWatcher? _configFileWatcher;
     private bool _disposedValue;
@@ -1494,7 +1521,7 @@ public sealed class Config : IConfig, IDisposable
     /// also largely controls and have the client create it anywhere the game process can
     /// write. Falling back to the domain name keeps a bad name from taking the config down.
     /// </summary>
-    private static string ConfigPathFor(ICoreAPI api, string? fileName)
+    internal static string ConfigPathFor(ICoreAPI api, string? fileName)
     {
         string root = Path.GetFullPath(Path.Combine(api.DataBasePath, "ModConfig"));
 

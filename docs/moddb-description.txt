@@ -21,6 +21,9 @@ or autoconfiglib it stands down and says so in the log, so nothing breaks, but o
 them can manage your configs. Config managers that only handle some mods are a different
 matter: name a mod under UnmanagedDomains in ModConfig/configkit.json and ConfigKit leaves
 that one alone without switching itself off.
+  - Mods that ship no settings screen can get one: set "AutoConfigs": true in
+ModConfig/configkit.json and ConfigKit builds one for every mod that reads its config with
+LoadModConfig. Off by default; it takes effect the next time a world loads.
   - You can join a server that doesn't have it, and you keep your own settings screen for
 client-side mods.
   - A server running it needs its players to have it too. Anyone without it is turned away on

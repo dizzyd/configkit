@@ -1,0 +1,9 @@
+{
+    "type": "code",
+    "modid": "ckautoconfig",
+    "name": "ConfigKit Auto Config Fixture",
+    "authors": [ "ConfigKit tests" ],
+    "description": "A fixture mod that reads its config with LoadModConfig and describes it to nobody, for ConfigKit's auto config tests. Compiled by the game from source, so it has no reference to ConfigKit. Not shipped.",
+    "version": "1.0.0",
+    "dependencies": { "game": "1.22.0" }
+}

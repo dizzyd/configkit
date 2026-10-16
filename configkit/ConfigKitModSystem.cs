@@ -27,24 +27,32 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     public IConfig? GetConfig(string domain) => GetConfigImpl(domain);
     public ISetting? GetSetting(string domain, string code) => GetConfigImpl(domain)?.GetSetting(code);
     public void RegisterManagedConfig(string domain, object configObject, string? path = null, Action? onSyncedFromServer = null, Action<string>? onSettingChanged = null, Action? onConfigSaved = null)
+        => TryRegisterManagedConfig(domain, configObject, path, onSyncedFromServer, onSettingChanged, onConfigSaved, rewriteExisting: true);
+
+    /// <summary>
+    /// <see cref="RegisterManagedConfig"/>, saying whether it took the config. Every refusal
+    /// below logs its own reason; this is for a caller that needs to know the outcome too.
+    /// </summary>
+    /// <param name="rewriteExisting">See the Config constructor of the same parameter.</param>
+    internal bool TryRegisterManagedConfig(string domain, object configObject, string? path, Action? onSyncedFromServer, Action<string>? onSettingChanged, Action? onConfigSaved, bool rewriteExisting)
     {
-        if (_api == null) return;
+        if (_api == null) return false;
 
         // Accepting a registration while dormant would leave the caller believing its
         // settings are managed when nothing will ever sync or display them.
         if (StandingDown)
         {
             LoggerUtil.Notify(_api, this, $"Not registering '{domain}': ConfigKit has stood down in favour of another config mod.");
-            return;
+            return false;
         }
 
         if (!_canRegisterNewConfig)
         {
             LoggerUtil.Error(_api, this, $"Cant register custom managed config '{domain}': too late, configs have been already sent to clients");
-            return;
+            return false;
         }
 
-        if (Unmanaged(domain)) return;
+        if (Unmanaged(domain)) return false;
 
         // A domain already taken. Dictionary.Add throws, and this method is called from a
         // mod's StartPre - so the throw escapes into the mod loader and that mod fails to
@@ -55,7 +63,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         if (_configs.ContainsKey(domain))
         {
             LoggerUtil.Notify(_api, this, $"Not registering '{domain}': a config is already registered under that domain.");
-            return;
+            return false;
         }
 
         // What the dropdown calls this config. A domain that is a mod id resolves to that
@@ -63,7 +71,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         // when nobody translated it. That last case is what SetConfigDisplayName is for.
         string name = _api.ModLoader.GetMod(domain)?.Info.Name ?? Lang.Get(domain);
 
-        Config config = new(_api, domain, name, configObject, path ?? domain + ".json");
+        Config config = new(_api, domain, name, configObject, path ?? domain + ".json", rewriteExisting);
 
         // Say what was registered, and say what was not. The old reflection walk dropped
         // every member it could not classify with no row, no key and no log line, so a mod
@@ -117,6 +125,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         }
 
         _customManagedConfigs.Add(domain);
+        return true;
     }
 
     /// <summary>
@@ -202,6 +211,25 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     private bool _leaving;
     private ConfigGuiManager? _guiManager;
 
+    /// <summary>
+    /// What AutoConfigs saw each mod load or store, by file, until AssetsLoaded registers it.
+    /// The latest load wins, because that is the object the mod went on to hold.
+    /// </summary>
+    private readonly Dictionary<string, (string Assembly, object Value)> _autoConfigs = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The domain each auto config was registered under, by file, for a mod that reloads it.</summary>
+    private readonly Dictionary<string, string> _autoDomainsByFile = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _autoModIds = new(StringComparer.OrdinalIgnoreCase);
+    private readonly bool _autoConfigsOn;
+    private bool _autoConfigsRegistered;
+
+    /// <summary>
+    /// The mod loader constructs every mod system after loading every mod assembly and
+    /// before calling anyone's StartPre - the one point at which no mod has read its config.
+    /// The switch is settled here too, not in StartPre: a mod whose StartPre runs before
+    /// ours reads its config before StartPre could have turned recording on.
+    /// </summary>
+    public ConfigKitModSystem() => _autoConfigsOn = AutoConfigs.Install();
+
     public override void StartPre(ICoreAPI api)
     {
         _api = api;
@@ -218,6 +246,9 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         // Read even while standing down: it costs nothing, and it means the file exists to be
         // found by someone whose first encounter with ConfigKit is a conflict.
         _unmanaged = OwnConfig.UnmanagedDomains(api);
+        OwnConfig.AddMissingKeys(api);
+
+        if (!StandingDown && AutoConfigs.Report is { } report) LoggerUtil.Notify(api, this, report);
     }
 
     /// <summary>
@@ -271,7 +302,13 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     }
     public override void AssetsLoaded(ICoreAPI api)
     {
-        if (StandingDown) return;
+        if (StandingDown)
+        {
+            // Install stands aside when configlib is loaded, so this is normally empty. A world
+            // that turned configlib on after an earlier one ran with auto configs is not.
+            _autoConfigs.Clear();
+            return;
+        }
 
         LoadConfigs();
         _api?.Logger.Notification($"[ConfigKit] Configs loaded: {_configs.Count}");
@@ -505,8 +542,13 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         // Nothing is managed while dormant, and nothing listed is managed ever.
         if (StandingDown || _unmanaged.Contains(domain)) return false;
 
-        // Already claimed - a registration, or an asset already read.
-        if (_domains.Contains(domain)) return true;
+        // Already claimed - a registration, or an asset already read, or an auto config,
+        // which registers under the mod id only when the file is named after the mod.
+        if (_domains.Contains(domain) || _autoModIds.Contains(domain)) return true;
+
+        // Noted but not yet registered: an auto config AssetsLoaded will pick up, unless the
+        // mod turns out to describe itself, which is the asset check below.
+        if (AutoConfigPending(domain)) return true;
 
         // Not yet claimed, but declared: this is what LoadConfigs will pick up.
         try
@@ -519,6 +561,23 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         {
             // Assets are not readable before AssetsLoaded. Being asked that early can only
             // mean the answer is "whatever has registered so far", which is the check above.
+            return false;
+        }
+    }
+
+    private bool AutoConfigPending(string modId)
+    {
+        if (_api == null || _autoConfigsRegistered) return false;
+
+        try
+        {
+            return _autoConfigs.Values.Any(noted =>
+                string.Equals(AutoConfigs.ModFor(_api, noted.Assembly)?.Info.ModID, modId, StringComparison.OrdinalIgnoreCase)
+                && AutoConfigs.WhyNot(noted.Value.GetType()) == null);
+        }
+        catch (Exception)
+        {
+            // WillManage is asked by other mods, and an answer of "no" is no worse than before.
             return false;
         }
     }
@@ -542,6 +601,8 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
             }
         }
 
+        RegisterAutoConfigs();
+
         if (_api.Side == EnumAppSide.Server)
         {
             foreach ((string domain, Config config) in _configsToRegister)
@@ -554,6 +615,95 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         ConfigRegistry.OnToBytes += StopRegistering;
     }
     private void StopRegistering() => _canRegisterNewConfig = false;
+
+    /// <summary>Called by AutoConfigs from inside another mod's LoadModConfig or StoreModConfig.</summary>
+    internal void NoteAutoConfig(string assembly, string file, object value, bool loaded)
+    {
+        if (!_autoConfigsOn) return;
+
+        if (_autoConfigsRegistered)
+        {
+            // A mod that loads its config again - a reload command, say - now holds a new
+            // object. Left alone, the screen and the file watcher would go on writing into the
+            // one it dropped, and every edit would look saved and never arrive.
+            if (_autoDomainsByFile.TryGetValue(file, out string? domain) && _configs.TryGetValue(domain, out Config? config))
+            {
+                config.Retarget(value);
+            }
+            else
+            {
+                LoggerUtil.Verbose(_api, this, $"'{file}' was read after configs were registered; it gets no auto config.");
+            }
+            return;
+        }
+
+        // A store only stands in for a load that found no file. Mods also keep data other than
+        // settings in ModConfig, and a load is the better sign that a file is a config.
+        if (!loaded && _autoConfigs.ContainsKey(file)) return;
+
+        _autoConfigs[file] = (assembly, value);
+    }
+
+    /// <summary>
+    /// Registers a screen for each config AutoConfigs noted, unless its mod already has one.
+    /// Runs after the configlib-patches.json assets, so anything a mod declared for itself -
+    /// by asset or by a RegisterManagedConfig call - has claimed its domain first.
+    /// </summary>
+    private void RegisterAutoConfigs()
+    {
+        _autoConfigsRegistered = true;
+        if (_api == null || _autoConfigs.Count == 0) return;
+
+        // What mods have already described for themselves. Both, because neither alone is
+        // enough: a mod may register under a domain that is not its id - "insanitylibconfig" -
+        // and a file can be claimed by a config the mod never named after itself. Taken before
+        // the first auto config claims anything, and leaving out earlier auto configs, so one
+        // file's guess is never mistaken for the mod describing another.
+        HashSet<string> describedMods = new(_domains.Except(_autoDomainsByFile.Values), StringComparer.OrdinalIgnoreCase);
+        HashSet<string> describedFiles = new(_configs.Values.Select(config => config.ConfigFilePath), StringComparer.OrdinalIgnoreCase);
+        int registered = 0;
+
+        foreach ((string file, (string assembly, object value)) in _autoConfigs.OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            Mod? mod = AutoConfigs.ModFor(_api, assembly);
+            if (mod == null)
+            {
+                LoggerUtil.Verbose(_api, this, $"No auto config for '{file}': could not tell which mod loaded it.");
+                continue;
+            }
+
+            string modId = mod.Info.ModID;
+            if (describedMods.Contains(modId) || describedFiles.Contains(Config.ConfigPathFor(_api, file)) || Unmanaged(modId)) continue;
+
+            string? whyNot;
+            try
+            {
+                whyNot = AutoConfigs.WhyNot(value.GetType());
+            }
+            catch (Exception exception)
+            {
+                whyNot = exception.Message;
+            }
+
+            if (whyNot != null)
+            {
+                LoggerUtil.Verbose(_api, this, $"No auto config for '{file}' ({modId}): {whyNot}.");
+                continue;
+            }
+
+            string domain = AutoConfigs.DomainFor(modId, file);
+            if (!TryRegisterManagedConfig(domain, value, file, null, null, null, rewriteExisting: false)) continue;
+
+            _autoDomainsByFile[file] = domain;
+            _autoModIds.Add(modId);
+            SetConfigDisplayName(domain, domain == modId ? mod.Info.Name : $"{mod.Info.Name} ({file})");
+            registered++;
+        }
+
+        _autoConfigs.Clear();
+
+        if (registered > 0) LoggerUtil.Notify(_api, this, $"Auto configs: built {registered} settings screen(s) for mods that describe none.");
+    }
     private void LoadConfig(IAsset asset, ConfigRegistry? registry)
     {
         if (_api == null) return;

@@ -1,7 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using Newtonsoft.Json;
 using Vintagestory.API.Common;
+using Vintagestory.API.Config;
+using Vintagestory.API.Datastructures;
 
 namespace ConfigKit;
 
@@ -34,6 +38,16 @@ public sealed class ConfigKitOwnConfig
     /// whoever is looking at the broken screen rather than to either library's author.
     /// </summary>
     public List<string> UnmanagedDomains { get; set; } = [];
+
+    /// <summary>
+    /// Build a settings screen for every mod that reads its config with LoadModConfig and
+    /// describes it to nobody. See AutoConfigs.
+    ///
+    /// Off by default. It rewrites a call in every mod that makes one, and most players have
+    /// ConfigKit because another mod depends on it, not because they chose it. A mod that
+    /// misbehaves under it can still be excluded on its own through UnmanagedDomains.
+    /// </summary>
+    public bool AutoConfigs { get; set; }
 }
 
 public static class OwnConfig
@@ -79,5 +93,46 @@ public static class OwnConfig
         }
 
         return unmanaged;
+    }
+
+    /// <summary>
+    /// Writes back a file that predates one of the keys, so that the key shows. Nobody turns on
+    /// an option they cannot see. Read once untyped, to see which keys are really in the file -
+    /// the typed read fills a missing one with its default and cannot tell - and once typed,
+    /// to write back exactly what was there plus the new keys. A file that will not parse is
+    /// left alone: UnmanagedDomains has already reported it.
+    /// </summary>
+    public static void AddMissingKeys(ICoreAPI api)
+    {
+        try
+        {
+            JsonObject? onDisk = api.LoadModConfig(FileName);
+            if (onDisk == null || onDisk.KeyExists(nameof(ConfigKitOwnConfig.AutoConfigs))) return;
+
+            if (api.LoadModConfig<ConfigKitOwnConfig>(FileName) is { } own) api.StoreModConfig(own, FileName);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Whether auto configs are on, read straight from disk. It is needed in ConfigKit's
+    /// constructor, before there is an api to read it through. Anything unreadable means off:
+    /// the safe answer for an option that patches other mods.
+    /// </summary>
+    public static bool AutoConfigsEnabled()
+    {
+        try
+        {
+            string path = Path.Combine(GamePaths.ModConfig, FileName);
+            if (!File.Exists(path)) return false;
+
+            return JsonConvert.DeserializeObject<ConfigKitOwnConfig>(File.ReadAllText(path))?.AutoConfigs == true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 }

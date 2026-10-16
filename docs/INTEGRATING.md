@@ -208,6 +208,37 @@ ConfigKit-managed config with a screen of its own: a switch that turns settings 
 has to stay reachable once they are off. A malformed one is reported and ignored, because its
 whole job is to rescue a broken setup and it must not be able to cause one.
 
+### Auto configs
+
+`"AutoConfigs": true` in the same file gives a settings screen to mods that describe their
+config to nobody. ConfigKit finds every mod's `api.LoadModConfig<T>()` and
+`api.StoreModConfig<T>()` calls before any mod starts, redirects them through itself, and
+registers the object each one returned exactly as if the mod had passed it to
+`RegisterManagedConfig`. The screen edits that same object, so a mod that reads its
+settings each time it uses them sees an edit immediately; one that copied them at startup
+sees it next launch. A mod that loads its config again later - a reload command - takes the
+screen with it to the new object.
+
+It is off by default, because it rewrites a call in every mod that makes one. With it on:
+
+- **A mod that describes itself is never touched.** Anything referencing ConfigKit,
+  configlib or Auto Config Lib is skipped. A mod with a `configlib-patches.json` or a
+  `RegisterManagedConfig` call under its own id keeps the screen it declared, and a file
+  already registered under any domain - by reflection, say - is not registered twice.
+- **One config per file.** A file named after the mod registers under the mod id; any other
+  registers as `<modid>-<rest of the file name>` (`MyModServer.json` becomes `mymod-server`),
+  so a mod with several files gets one entry for each.
+- **The mod's file is left as it was.** Registering does not rewrite it, so a player's
+  comments survive until the first save from the screen.
+- **Only classes get a screen.** A struct, a raw `JsonObject`, a bare collection, or a class
+  with nothing editable on it is skipped, and says so in the verbose log.
+- **Calls ConfigKit cannot see are missed.** A call made through a generic helper of the mod's
+  own, or a file first read after `AssetsLoaded`, gets no screen.
+- `UnmanagedDomains` takes a mod out of auto configs as well.
+
+The log says at startup how many calls were redirected, or, with it off, how many mod
+assemblies read a config with `LoadModConfig` at all.
+
 ### For another config manager
 
 If you are writing a config manager of your own and want to leave ConfigKit's mods alone, ask:
@@ -282,6 +313,7 @@ Common answers:
 |---|---|
 | no settings screen at all | `configlib` or `autoconfiglib` is installed; ConfigKit stood down |
 | one mod has no settings screen | it is listed in `ModConfig/configkit.json` under `UnmanagedDomains` |
+| a mod that ships no description has no screen | `AutoConfigs` is off in `ModConfig/configkit.json`, which is the default |
 | one field missing, no log line | it is `[JsonIgnore]`, or `[Browsable(false)]` — the latter is still in the file |
 | a field shows as raw JSON | nothing can edit that type; it still round-trips |
 | an edit does not reach your object | it failed a validation attribute — the row is marked, the message is at the bottom of the window, and in `config.Errors`; for a container it names the entry |

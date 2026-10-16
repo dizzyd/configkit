@@ -25,6 +25,11 @@ pause menu.
 - **Don't install ConfigKit and configlib together.** If ConfigKit sees configlib or
   autoconfiglib it stands down and says so in the log, so nothing breaks, but only one
   of them manages your configs.
+- **Mods that ship no settings screen can get one.** Set `"AutoConfigs": true` in
+  `ModConfig/configkit.json` and ConfigKit builds a screen for every mod that reads its
+  config with `LoadModConfig`, the way Auto Config Lib does for configlib. It is off by
+  default and takes effect the next time a world loads. A mod that misbehaves under it can
+  be left out on its own through `UnmanagedDomains`.
 - **You can join a server that doesn't have it**, and you keep your own settings screen
   for client-side mods.
 - **A server running it needs its players to have it.** Anyone without ConfigKit is turned

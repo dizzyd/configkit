@@ -24,6 +24,10 @@ them can manage your configs. Config managers that only handle <em>some</em> mod
 different matter: name a mod under <code>UnmanagedDomains</code> in
 <code>ModConfig/configkit.json</code> and ConfigKit leaves that one alone without switching
 itself off.</li>
+<li><strong>Mods that ship no settings screen can get one.</strong> Set
+<code>"AutoConfigs": true</code> in <code>ModConfig/configkit.json</code> and ConfigKit builds
+one for every mod that reads its config with <code>LoadModConfig</code>. Off by default; it
+takes effect the next time a world loads.</li>
 <li>You can join a server that doesn't have it, and you keep your own settings screen for
 client-side mods.</li>
 <li>A server running it needs its players to have it too. Anyone without it is turned away on
