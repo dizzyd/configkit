@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using ConfigKit;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
 using VsTestkit.Testing;
 using static VsTestkit.Testing.Vs;
@@ -178,6 +179,62 @@ public class SchemaTests
     {
         public int Depth = 1;
         public SelfReferential? Config;
+    }
+
+    /// <summary>The shape of C&amp;N Jewelry's panningDrops: item stacks, each with a JsonObject.</summary>
+    public class HoldsItemStacks
+    {
+        public int Count = 1;
+        public Dictionary<string, JsonItemStack[]> Drops = new();
+        public JsonObject? Extra;
+        public JsonItemStack Reward = new() { Type = EnumItemClass.Item, Code = new AssetLocation("game:stick") };
+    }
+
+    /// <summary>A collection of itself, which no object ever interrupts.</summary>
+    public class Branch : List<Branch>
+    {
+    }
+
+    public class HoldsBranches
+    {
+        public int Depth = 1;
+        public Branch Tree = new();
+    }
+
+    /// <summary>Writes a set as "a,b", as C&amp;N Jewelry's CompactStringSetConverter does.</summary>
+    public class CommaSetConverter : JsonConverter<HashSet<string>>
+    {
+        public override void WriteJson(JsonWriter writer, HashSet<string>? value, JsonSerializer serializer)
+            => writer.WriteValue(string.Join(",", value ?? []));
+
+        public override HashSet<string> ReadJson(JsonReader reader, Type objectType, HashSet<string>? existingValue, bool hasExistingValue, JsonSerializer serializer)
+            => new(((string?)reader.Value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    /// <summary>Writes an int[] as "3,2", as C&amp;N Jewelry's CompactIntArrayConverter does.</summary>
+    public class CommaIntsConverter : JsonConverter<int[]>
+    {
+        public override void WriteJson(JsonWriter writer, int[]? value, JsonSerializer serializer)
+            => writer.WriteValue(string.Join(",", value ?? []));
+
+        public override int[] ReadJson(JsonReader reader, Type objectType, int[]? existingValue, bool hasExistingValue, JsonSerializer serializer)
+            => ((string?)reader.Value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse).ToArray();
+    }
+
+    public class ConverterWritten
+    {
+        public int Count = 1;
+
+        // [Required] because validation converts the value too, and once read it as null.
+        [Required]
+        [JsonConverter(typeof(CommaSetConverter))]
+        public HashSet<string> Tags = ["a", "b"];
+
+        [JsonProperty(ItemConverterType = typeof(CommaIntsConverter))]
+        public Dictionary<string, int[]> Tiers = new() { ["knife"] = [3, 2] };
+
+        [JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))]
+        public EnumAppSide Side = EnumAppSide.Client;
     }
 
     public class ContainerSettings
@@ -730,6 +787,118 @@ public class SchemaTests
 
         Assert.True(config.SchemaNotices.Any(notice => notice.Contains("cycle")),
             $"the cycle was skipped without saying so; notices: {string.Join(" | ", config.SchemaNotices)}");
+    }
+
+    /// <summary>
+    /// JsonObject declares itself a collection of JsonObject, and every JsonItemStack holds
+    /// one. Before it was raw JSON, building this schema overflowed the stack and took the
+    /// game down - C&amp;N Jewelry's config did, under auto configs.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task AnItemStackWithAttributesDoesNotRecurse()
+    {
+        await OnServer();
+
+        Config config = Fresh(new HoldsItemStacks(), "schema-itemstacks", "configkit-schema-itemstacks.json");
+
+        Assert.True(config.SettingCodes.Contains("Count"), "the config came back empty");
+        Assert.True(config.SchemaNotices.Any(notice => notice.Contains("Extra") && notice.Contains("raw JSON")),
+            $"the JsonObject was not shown as raw JSON; notices: {string.Join(" | ", config.SchemaNotices)}");
+        Assert.Null(AutoConfigs.WhyNot(typeof(HoldsItemStacks)));
+    }
+
+    /// <summary>
+    /// A JsonItemStack's ResolvedItemstack is the game's own runtime object. Walked, it logged
+    /// a notice for every texture, sound and shape member of Item and Block; as a setting, it
+    /// was assigned the file's null over a stack the mod had already resolved.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task AResolvedItemStackIsLeftToTheMod()
+    {
+        await OnServer();
+
+        HoldsItemStacks settings = new();
+        Config config = Fresh(settings, "schema-resolved", "configkit-schema-resolved.json");
+
+        Assert.False(config.SchemaNotices.Any(notice => notice.Contains("ResolvedItemstack/")),
+            $"walked into the resolved stack; notices: {string.Join(" | ", config.SchemaNotices)}");
+        Assert.False(config.SettingCodes.Any(code => code.Contains("ResolvedItem")),
+            $"the resolved stack became a setting; codes: {string.Join(", ", config.SettingCodes)}");
+
+        Assert.True(settings.Reward.Resolve(Sapi.World, "configkit test"), "game:stick did not resolve");
+        config.AssignSettingsValues(settings);
+
+        Assert.NotNull(settings.Reward.ResolvedItemstack);
+    }
+
+    /// <summary>
+    /// A collection whose elements are its own type never reaches the object cycle guard, so
+    /// containers need one of their own.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task ACollectionOfItselfDoesNotRecurse()
+    {
+        await OnServer();
+
+        Config config = Fresh(new HoldsBranches(), "schema-branches", "configkit-schema-branches.json");
+
+        Assert.True(config.SettingCodes.Contains("Depth"), "the config came back empty");
+        Assert.True(config.SchemaNotices.Any(notice => notice.Contains("Tree") && notice.Contains("cycle")),
+            $"the cycle was skipped without saying so; notices: {string.Join(" | ", config.SchemaNotices)}");
+        Assert.True(config.SettingCodes.Contains("Tree"), "a tree is data, but it was dropped from the config");
+    }
+
+    /// <summary>
+    /// A member written by its own converter holds the converter's shape in the file, not its
+    /// declared type's. Assigning it back once converted it as the declared type, failed, and
+    /// wrote null over the mod's data - every such collection in C&amp;N Jewelry's config.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task AMemberWithItsOwnConverterSurvivesAssignment()
+    {
+        await OnServer();
+
+        ConverterWritten settings = new();
+        Config config = Fresh(settings, "schema-converters", "configkit-schema-converters.json");
+
+        string written = File.ReadAllText(PathOf("configkit-schema-converters.json"));
+        Assert.True(written.Contains("\"a,b\"") && written.Contains("\"3,2\""),
+            $"the file does not hold what the converters write: {written}");
+
+        // New values, in the converters' shapes, onto an object that holds something else - so
+        // only a value read through the converter can make these pass.
+        config.GetSetting("Tags")!.Value = new JsonObject(new JValue("x,y"));
+        config.GetSetting("Tiers")!.Value = new JsonObject(JObject.Parse(@"{ ""axe"": ""5,4"" }"));
+
+        ConverterWritten fresh = new() { Tags = [], Tiers = [] };
+        config.AssignSettingsValues(fresh);
+
+        Assert.True(fresh.Tags.SetEquals(["x", "y"]), $"Tags came back as {string.Join(",", fresh.Tags)}");
+        Assert.True(fresh.Tiers.TryGetValue("axe", out int[]? tiers) && tiers.SequenceEqual([5, 4]),
+            $"Tiers came back as {JsonConvert.SerializeObject(fresh.Tiers)}");
+        Assert.Null(((ConfigSetting)config.GetSetting("Tags")!).Error);
+
+        Assert.True(config.SchemaNotices.Any(notice => notice.Contains("Tags") && notice.Contains("JsonConverter")),
+            $"Tags was not shown as raw JSON; notices: {string.Join(" | ", config.SchemaNotices)}");
+    }
+
+    /// <summary>
+    /// A converter on a scalar - StringEnumConverter on an enum, the common case - writes a
+    /// shape the scalar editor already reads, so the member keeps its editor.
+    /// </summary>
+    [VsTest(TimeoutMs = 60000)]
+    public async Task AnEnumUnderStringEnumConverterKeepsItsEditor()
+    {
+        await OnServer();
+
+        ConverterWritten settings = new();
+        Config config = Fresh(settings, "schema-enumconverter", "configkit-schema-enumconverter.json");
+
+        Assert.False(config.GetSetting("Side")!.SettingType == ConfigSettingType.Other,
+            "Side was given raw JSON rather than an editor");
+
+        config.AssignSettingsValues(settings);
+        Assert.Equal(EnumAppSide.Client, settings.Side);
     }
 
     /// <summary>

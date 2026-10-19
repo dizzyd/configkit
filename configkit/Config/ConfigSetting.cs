@@ -6,6 +6,7 @@
 // Derived from ConfigLib by Maltiez (https://github.com/maltiez2/vsmod_configlib),
 // released under CC0 1.0 Universal. Adapted to drop the Dear ImGui dependency.
 
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using ProtoBuf;
 using System.Diagnostics;
@@ -81,7 +82,7 @@ public class ConfigSetting : ISetting
     public string? Error { get; internal set; }
 
     /// <summary>This setting's value as the member's own type. For the validators.</summary>
-    internal object? CoercedValue(Type memberType) => CoerceTo(memberType);
+    internal object? CoercedValue(Type memberType, object owner) => CoerceTo(memberType, owner.GetType());
     /// <summary>
     /// The member this setting was reflected from, for a managed config. Null for one built
     /// from a definition file, which has no class behind it.
@@ -271,7 +272,7 @@ public class ConfigSetting : ISetting
                 && FillInPlace(property.GetValue(target));
         }
 
-        object? value = CoerceTo(property.PropertyType);
+        object? value = CoerceTo(property.PropertyType, target.GetType());
         if (value == null && !CanTakeNull(property.PropertyType)) return false;
 
         property.SetValue(target, value);
@@ -287,7 +288,7 @@ public class ConfigSetting : ISetting
             return SettingType == ConfigSettingType.Other && FillInPlace(field.GetValue(target));
         }
 
-        object? value = CoerceTo(field.FieldType);
+        object? value = CoerceTo(field.FieldType, target.GetType());
         if (value == null && !CanTakeNull(field.FieldType)) return false;
 
         field.SetValue(target, value);
@@ -303,18 +304,17 @@ public class ConfigSetting : ISetting
     private bool StoredNull => Value.Token == null || Value.Token.Type == JTokenType.Null;
 
     /// <summary>
-    /// Converts this setting's value to the member's own declared type.    /// <summary>
-    /// Whether null may be written to a member of this type. A reference type always takes
-    /// it; a nullable value type takes it only when the null is really what was stored -
-    /// Nullable&lt;int&gt; reports IsValueType true, which is why an int? left unset used to be
-    /// skipped rather than nulled. A plain value type never does, because assigning null to
-    /// an int field throws and would cost the member its value entirely.
+    /// Whether null may be written to a member of this type: only when null is really what
+    /// was stored, and the member is a reference type or a nullable value type. A null from
+    /// a conversion that failed leaves the member as it is - writing it wiped every
+    /// converter-written collection in C&amp;N Jewelry's config. A plain value type never
+    /// takes null, because assigning it to an int field throws.
     /// </summary>
     private bool CanTakeNull(Type memberType)
-        => !memberType.IsValueType
-           || (System.Nullable.GetUnderlyingType(memberType) != null && StoredNull);
+        => StoredNull && (!memberType.IsValueType || System.Nullable.GetUnderlyingType(memberType) != null);
 
-
+    /// <summary>
+    /// Converts this setting's value to the member's own declared type.
     ///
     /// The settings model has one floating point type and one integer type, but a config
     /// class does not: a <c>double</c> field is classified as Float, and assigning a
@@ -323,7 +323,11 @@ public class ConfigSetting : ISetting
     /// so does a field typed <c>long</c> or <c>byte</c>. Converting to the target type
     /// rather than assuming it is what the model happened to pick keeps all of them working.
     /// </summary>
-    private object? CoerceTo(Type memberType)
+    /// <param name="ownerType">
+    /// The concrete type of the object the value is going onto. A member with a converter of
+    /// its own is read through its owner's contract, and the declaring type may be abstract.
+    /// </param>
+    private object? CoerceTo(Type memberType, Type ownerType)
     {
         Type type = System.Nullable.GetUnderlyingType(memberType) ?? memberType;
 
@@ -367,7 +371,9 @@ public class ConfigSetting : ISetting
                 ConfigSettingType.Integer => Convert.ChangeType(value.AsInt(), type, CultureInfo.InvariantCulture),
                 ConfigSettingType.String => FromString(value.AsString(""), type),
                 ConfigSettingType.Color => FromString(value.AsString(""), type),
-                ConfigSettingType.Other => Structured(value, type),
+                ConfigSettingType.Other => Node?.Member is { } member && SchemaBuilder.HasMemberJsonConverter(member)
+                    ? ThroughOwnConverter(value, member, ownerType)
+                    : Structured(value, type),
                 _ => null
             };
         }
@@ -411,6 +417,30 @@ public class ConfigSetting : ISetting
         if (typeof(ITreeAttribute).IsAssignableFrom(type)) return Attributes.For(value);
 
         return value.Token?.ToObject(type);
+    }
+
+    /// <summary>
+    /// A member whose own converter writes it - a set as "a,b,c", an int[] as "3". Converting
+    /// the value to the member's type directly cannot read that, so it goes through the
+    /// owner's contract exactly as the mod's own LoadModConfig would: into a blank owner,
+    /// under the member's JSON name, and read back off it.
+    /// </summary>
+    private static object? ThroughOwnConverter(JsonObject value, MemberInfo member, Type ownerType)
+    {
+        if (value.Token == null) return null;
+
+        string? name = SchemaBuilder.JsonNameInContract(ownerType, member);
+        if (name == null) return null;
+
+        object blank = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(ownerType);
+        JsonSerializer.CreateDefault().Populate(new JObject { [name] = value.Token.DeepClone() }.CreateReader(), blank);
+
+        return member switch
+        {
+            FieldInfo field => field.GetValue(blank),
+            PropertyInfo property => property.GetValue(blank),
+            _ => null
+        };
     }
 
     /// <summary>

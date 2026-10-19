@@ -37,7 +37,7 @@ internal static class Validate
     /// </summary>
     internal static string? Check(ConfigSetting setting, SchemaNode node, object owner)
     {
-        string? own = CheckRules(node, owner, () => setting.CoercedValue(node.MemberType));
+        string? own = CheckRules(node, owner, () => setting.CoercedValue(node.MemberType, owner));
         if (own != null) return own;
 
         return node.Kind is SchemaKind.Dictionary or SchemaKind.List

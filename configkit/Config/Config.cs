@@ -466,7 +466,15 @@ public sealed class Config : IConfig, IDisposable
         setting.Error = Validate.Check(setting, node, owner);
         if (setting.Error != null) return false;
 
-        return setting.AssignTo(owner, node.Member);
+        if (setting.AssignTo(owner, node.Member)) return true;
+
+        // The member is left as it was, which is right, but the row shows the value as saved.
+        // Once per setting: a sync or a file watcher would otherwise repeat it on every pass.
+        if (_unassignable.Add(code))
+        {
+            LoggerUtil.Verbose(_api, this, $"'{code}' in '{_domain}' could not be assigned to its {SchemaBuilder.Describe(node.MemberType)} member; the mod keeps its own value.");
+        }
+        return false;
     }
 
     /// <summary>
@@ -550,6 +558,8 @@ public sealed class Config : IConfig, IDisposable
     /// the author's config, switching off takes the attached one back here.
     /// </summary>
     private readonly Dictionary<SchemaNode, object> _detached = new();
+    /// <summary>Settings already reported as not reaching their member, so each is logged once.</summary>
+    private readonly HashSet<string> _unassignable = [];
     private readonly SortedDictionary<float, IConfigBlock> _configBlocks;
     private readonly JsonObject _json;
     private readonly ConfigPatches _patches;
@@ -1207,6 +1217,26 @@ public sealed class Config : IConfig, IDisposable
         object? value = owner == null
             ? null
             : (node.Member as PropertyInfo)?.GetValue(owner) ?? (node.Member as FieldInfo)?.GetValue(owner);
+
+        // A member's own converter only applies when its owner is serialised. Taking the value
+        // alone would write a set the mod stores as "a,b" as an array, which its converter then
+        // cannot read back. Tried on its own, so an owner with some other member Newtonsoft
+        // cannot serialise still falls back to the value rather than to nothing.
+        if (value != null && node.Member != null && SchemaBuilder.HasMemberJsonConverter(node.Member))
+        {
+            try
+            {
+                if (SchemaBuilder.JsonNameInContract(owner!.GetType(), node.Member) is { } name
+                    && JToken.FromObject(owner)[name] is { } written)
+                {
+                    return written;
+                }
+            }
+            catch (Exception)
+            {
+                // Falls through to the value alone.
+            }
+        }
 
         if (value != null)
         {

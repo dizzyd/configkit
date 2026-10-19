@@ -6,6 +6,8 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using System.Reflection;
+using Vintagestory.API.Common;
+using Vintagestory.API.Datastructures;
 
 namespace ConfigKit;
 
@@ -283,6 +285,16 @@ internal static class SchemaBuilder
         // adding it can never delete a value from a file that already holds one.
         if (HasJsonIgnore(member)) return null;
 
+        // A live game object - JsonItemStack's ResolvedItemstack - is filled in by the game at
+        // runtime, never by a config file. As a setting it would be assigned on every load and
+        // sync, writing the file's null over a stack the mod had already resolved. Excluded
+        // like [JsonIgnore]; the skeleton still writes it, so the file keeps its shape.
+        if (IsLiveGameObject(memberType))
+        {
+            notices.Add($"'{(prefix.Length == 0 ? member.Name : $"{prefix}/{member.Name}")}' ({Describe(memberType)}) is a live game object rather than a setting; it is left out.");
+            return null;
+        }
+
         SchemaNode node = new()
         {
             Member = member,
@@ -322,7 +334,18 @@ internal static class SchemaBuilder
 
         ApplyCategory(member, node, inheritedId: sectionId, inheritedLabel: sectionLabel);
 
-        Classify(node, visiting, depth, notices, position);
+        // A scalar keeps its editor: an enum under StringEnumConverter is written by name, which
+        // is what this library writes anyway, and a scalar whose converter writes something
+        // else fails to convert and is left alone rather than nulled.
+        if (HasMemberJsonConverter(member) && !IsScalar(Nullable.GetUnderlyingType(memberType) ?? memberType))
+        {
+            node.Kind = SchemaKind.Opaque;
+            notices.Add($"'{node.Path}' is written by its own JsonConverter; it is stored and shown as raw JSON.");
+        }
+        else
+        {
+            Classify(node, visiting, depth, notices, position);
+        }
 
         if (CannotBeAssigned(node) && node.Kind is not (SchemaKind.Dictionary or SchemaKind.List))
         {
@@ -410,6 +433,34 @@ internal static class SchemaBuilder
             return;
         }
 
+        // The game's JsonObject is free-form JSON, but it declares itself a collection of
+        // JsonObject, so the container walk below would describe its elements as more of the
+        // same, forever. JsonItemStack's Attributes is one, but its own converter has already
+        // made it raw JSON in Build; this catches a JsonObject with no converter.
+        if (typeof(JsonObject).IsAssignableFrom(type))
+        {
+            node.Kind = SchemaKind.Opaque;
+            notices.Add($"'{node.Path}' ({Describe(type)}) is free-form JSON; it is stored and shown as raw JSON.");
+            return;
+        }
+
+        // A member holding one is left out in Build. Inside a container there is no member to
+        // leave out, and walking one reaches hundreds of the game's own members, each logged.
+        if (IsLiveGameObject(type))
+        {
+            node.Kind = SchemaKind.Opaque;
+            notices.Add($"'{node.Path}' ({Describe(type)}) is a live game object rather than a setting; it is stored and shown as raw JSON.");
+            return;
+        }
+
+        // The same for a type that names its own converter, wherever it is used.
+        if (HasTypeJsonConverter(type))
+        {
+            node.Kind = SchemaKind.Opaque;
+            notices.Add($"'{node.Path}' ({Describe(type)}) is written by its own JsonConverter; it is stored and shown as raw JSON.");
+            return;
+        }
+
         if (type.IsArray)
         {
             Type? element = type.GetElementType();
@@ -460,14 +511,35 @@ internal static class SchemaBuilder
 
     private static void BuildContainer(SchemaNode node, SchemaKind kind, Type valueType, Type? keyType, Stack<Type> visiting, int depth, List<string> notices)
     {
-        node.Kind = kind;
-
-        if (keyType != null)
+        // A collection whose elements are its own type - as JsonObject's are - recurses here
+        // without ever reaching BuildObject's guard, and a stack overflow cannot be caught.
+        // Unlike an object holding itself, which is a handle back to the config, this is data -
+        // a tree - and Newtonsoft round-trips it, so it stays in the config as raw JSON.
+        Type container = node.MemberType;
+        if (visiting.Contains(container))
         {
-            node.KeyNode = Describe(keyType, $"{node.Path}<key>", visiting, depth, notices);
+            node.Kind = SchemaKind.Opaque;
+            notices.Add($"'{node.Path}' is a {Describe(container)} inside another {Describe(container)}, a cycle; it is stored and shown as raw JSON.");
+            return;
         }
 
-        SchemaNode value = Describe(valueType, $"{node.Path}<value>", visiting, depth, notices);
+        node.Kind = kind;
+
+        SchemaNode value;
+        visiting.Push(container);
+        try
+        {
+            if (keyType != null)
+            {
+                node.KeyNode = Describe(keyType, $"{node.Path}<key>", visiting, depth, notices);
+            }
+
+            value = Describe(valueType, $"{node.Path}<value>", visiting, depth, notices);
+        }
+        finally
+        {
+            visiting.Pop();
+        }
 
         if (kind == SchemaKind.Dictionary) node.ValueNode = value;
         else node.ElementNode = value;
@@ -672,6 +744,38 @@ internal static class SchemaBuilder
     private static bool HasJsonIgnore(MemberInfo member)
         => member.GetCustomAttributes(inherit: true)
                  .Any(attribute => attribute.GetType().Name == "JsonIgnoreAttribute");
+
+    /// <summary>
+    /// Whether a member is written by a converter of its own - [JsonConverter] on it, or an
+    /// ItemConverterType for its elements. Its file holds whatever that converter writes, a
+    /// set as "a,b,c" say, which is not the shape its declared type describes; only the
+    /// converter can read it back, so ConfigSetting reads it through that converter too.
+    ///
+    /// Newtonsoft's attributes only, unlike [JsonIgnore] above: LoadModConfig reads with
+    /// Newtonsoft, so System.Text.Json's converter never touches the file.
+    /// </summary>
+    internal static bool HasMemberJsonConverter(MemberInfo member)
+        => member.IsDefined(typeof(Newtonsoft.Json.JsonConverterAttribute), inherit: true)
+           || member.GetCustomAttribute<Newtonsoft.Json.JsonPropertyAttribute>(inherit: true)?.ItemConverterType != null;
+
+    /// <summary>
+    /// The name a member is read and written under by Newtonsoft, through its owner's contract
+    /// exactly as the mod's own LoadModConfig resolves it - so a naming strategy set in
+    /// JsonConvert.DefaultSettings applies here too.
+    /// </summary>
+    internal static string? JsonNameInContract(Type ownerType, MemberInfo member)
+        => (Newtonsoft.Json.JsonSerializer.CreateDefault().ContractResolver.ResolveContract(ownerType) as Newtonsoft.Json.Serialization.JsonObjectContract)?
+           .Properties.FirstOrDefault(property => property.UnderlyingName == member.Name)?.PropertyName;
+
+    private static bool HasTypeJsonConverter(Type type)
+        => type.IsDefined(typeof(Newtonsoft.Json.JsonConverterAttribute), inherit: true);
+
+    private static bool IsLiveGameObject(Type type)
+        => typeof(ItemStack).IsAssignableFrom(type) || typeof(RegistryObject).IsAssignableFrom(type);
+
+    /// <summary>What Classify would give an editor of its own: a scalar, or a type written as a string.</summary>
+    private static bool IsScalar(Type type)
+        => ScalarTypeOf(type) != ConfigSettingType.None || ConvertsToAndFromString(type);
 
     private static string? JsonPropertyName(MemberInfo member)
     {
