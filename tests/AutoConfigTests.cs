@@ -56,6 +56,8 @@ public class AutoConfigTests
 
     private static int Radius(object settings) => (int)settings.GetType().GetField("Radius")!.GetValue(settings)!;
 
+    private static void SetRadius(object settings, int radius) => settings.GetType().GetField("Radius")!.SetValue(settings, radius);
+
     private static void WriteSettings(string file, int radius)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(ModConfig(file))!);
@@ -304,6 +306,97 @@ public class AutoConfigTests
             Assert.Equal(original, File.ReadAllText(ModConfig(file)));
             await Task.CompletedTask;
         }, "Load");
+    }
+
+    /// <summary>
+    /// What the mod did to its object after loading it survives registration. Toolsmith
+    /// empties its tool lists straight after loading and appends to them as its assets load;
+    /// registration put the file's lists back in between, so every launch appended another
+    /// copy until the lists matched no tool at all.
+    /// </summary>
+    [VsTest(TimeoutMs = 90000)]
+    [RequiresClient]
+    public async Task RegistrationKeepsWhatTheModChangedAfterLoading()
+    {
+        await OnClient();
+
+        string file = Written("ckautoconfig-changed.json");
+        WriteSettings(file, 20);
+
+        await WithAutoConfigs(async () =>
+        {
+            object loaded = Load(file)!;
+            SetRadius(loaded, 7);
+
+            RegisterAutoConfigs();
+
+            Assert.Equal(7, Radius(loaded));
+            Assert.Equal(7, System.GetSetting("ckautoconfig-changed", "Radius")!.Value.AsInt());
+            await Task.CompletedTask;
+        }, "Load");
+    }
+
+    /// <summary>
+    /// An object that cannot be serialised has no document to read values from, so its
+    /// settings come from the file - and then the file's values have to reach the object, or
+    /// the screen shows one value while the mod runs on another.
+    /// </summary>
+    [VsTest(TimeoutMs = 90000)]
+    [RequiresClient]
+    public async Task AnObjectThatCannotBeWrittenTakesTheFilesValues()
+    {
+        await OnClient();
+
+        string file = Written("ckautoconfig-fragile.json");
+        WriteSettings(file, 20);
+        FieldInfo tangle = FixtureAssembly().GetType("CkAutoConfig.Fragile", throwOnError: true)!.GetField("Tangle")!;
+
+        await WithAutoConfigs(async () =>
+        {
+            try
+            {
+                object loaded = Fixture("LoadFragile").Invoke(null, [Capi, file])!;
+                SetRadius(loaded, 7);
+                tangle.SetValue(null, true);
+
+                RegisterAutoConfigs();
+
+                Assert.Equal(20, System.GetSetting("ckautoconfig-fragile", "Radius")!.Value.AsInt());
+                Assert.Equal(20, Radius(loaded));
+            }
+            finally
+            {
+                tangle.SetValue(null, false);
+            }
+            await Task.CompletedTask;
+        }, "LoadFragile");
+    }
+
+    public class Bounded { [System.ComponentModel.DataAnnotations.Range(1, 10)] public int Radius = 5; }
+
+    /// <summary>
+    /// A value the mod's own attributes reject shows on its row. Assigning used to be what
+    /// checked it, and a config read from its object no longer assigns at registration.
+    /// The mod keeps the value either way: it loaded it itself.
+    ///
+    /// Registered directly rather than through the fixture: the game compiles source mods
+    /// without System.ComponentModel.DataAnnotations, so the fixture cannot carry a [Range].
+    /// </summary>
+    [VsTest(TimeoutMs = 90000)]
+    [RequiresClient]
+    public async Task AValueTheModsAttributesRejectIsShown()
+    {
+        await OnClient();
+
+        string file = Written("ckautoconfig-bounded.json");
+        Bounded loaded = new() { Radius = 50 };
+
+        bool registered = (bool)typeof(ConfigKitModSystem).GetMethod("TryRegisterManagedConfig", Private)!
+            .Invoke(System, ["ckautoconfig-bounded", loaded, file, null, null, null, true])!;
+
+        Assert.True(registered, "the adopted config should have registered");
+        Assert.NotNull(((ConfigSetting)System.GetSetting("ckautoconfig-bounded", "Radius")!).Error);
+        Assert.Equal(50, loaded.Radius);
     }
 
     private const string InliningSource = """

@@ -144,17 +144,26 @@ public sealed class Config : IConfig, IDisposable
         }
     }
     public Config(ICoreAPI api, string domain, string modName, object configObject, string file)
-        : this(api, domain, modName, configObject, file, rewriteExisting: true)
+        : this(api, domain, modName, configObject, file, adopted: false)
     {
     }
 
-    /// <param name="rewriteExisting">
-    /// False leaves a file that already exists exactly as it is. An auto config is built over
-    /// a file the mod wrote and the player may have annotated - Newtonsoft reads comments in
-    /// JSON - and the values were just read from it, so rewriting it gains nothing and loses
-    /// the comments. The first save from the screen still rewrites it.
+    /// <param name="adopted">
+    /// True for an auto config: one built over an object the mod already loaded and may have
+    /// changed since, without the mod ever asking ConfigKit to manage it.
+    ///
+    /// Its settings start from that object, not from the file. Toolsmith empties six of its
+    /// fields straight after loading and refills them as its assets load; reading the file
+    /// put the last session's values back in between, the refill was appended to them, and
+    /// the fields grew a copy every launch until they matched nothing. An object Newtonsoft
+    /// cannot serialise has no document to start from, so it falls back to the file; see
+    /// <see cref="ValuesFromObject"/>.
+    ///
+    /// An existing file is also left exactly as it is. The mod wrote it, the player may have
+    /// annotated it - Newtonsoft reads comments in JSON - and rewriting it gains nothing and
+    /// loses the comments. The first save from the screen still rewrites it.
     /// </param>
-    internal Config(ICoreAPI api, string domain, string modName, object configObject, string file, bool rewriteExisting)
+    internal Config(ICoreAPI api, string domain, string modName, object configObject, string file, bool adopted)
     {
         _api = api;
         _domain = domain;
@@ -172,11 +181,14 @@ public sealed class Config : IConfig, IDisposable
             // file exists yet. It carries the exact nested shape - including every member
             // that has no setting of its own - so a path like "Thirst/HungerRate" has
             // something to be written into, and the file matches what the mod's own
-            // StoreModConfig would have produced.
-            ParseJson(_json, out _settings, out _configBlocks, out _defaultJson, domain, Skeleton(configObject));
+            // StoreModConfig would have produced. An adopted config also takes its values
+            // from it rather than from the file; see adopted.
+            string? skeleton = Skeleton(configObject);
+            ValuesFromObject = adopted && skeleton != null;
+            ParseJson(_json, out _settings, out _configBlocks, out _defaultJson, domain, skeleton, readValuesFrom: ValuesFromObject ? skeleton : null);
             _clientSideSettings = new(_settings);   // a copy: aliasing lets Clear() empty _settings
             _patches = new(api, this);
-            if (rewriteExisting || !File.Exists(ConfigFilePath)) WriteToFile();
+            if (!adopted || !File.Exists(ConfigFilePath)) WriteToFile();
             CreateFileWatcher();
             SubscribeToSettingsChanges();
         }
@@ -191,6 +203,15 @@ public sealed class Config : IConfig, IDisposable
     }
 
     internal void Apply() => _patches.Apply();
+
+    /// <summary>
+    /// True when the settings were read from the registered object rather than from the
+    /// file, so they already match it and assigning them back would only undo whatever the
+    /// mod changed after loading. Registration asks this rather than whether the config was
+    /// adopted: an adopted object that cannot be serialised was read from the file after all,
+    /// and then the file's values do have to be assigned.
+    /// </summary>
+    internal bool ValuesFromObject { get; }
 
     /// <summary>
     /// The settings definition this config was built from. For a managed config this is what
@@ -429,6 +450,30 @@ public sealed class Config : IConfig, IDisposable
         }
     }
     /// <summary>
+    /// Checks every setting against the attributes on its member, as assigning would, and
+    /// assigns nothing. For a config whose values were read from its object: there is nothing
+    /// to assign, but a value the mod's own [Range] rejects should still show on its row.
+    /// </summary>
+    internal void CheckSettingsValues()
+    {
+        if (_configObject == null) return;
+
+        foreach ((string code, ConfigSetting setting) in _settings)
+        {
+            if (setting.Node is not { } node || node.Kind == SchemaKind.Object) continue;
+
+            try
+            {
+                if (OwnerFor(node, _configObject) is { } owner) setting.Error = Validate.Check(setting, node, owner);
+            }
+            catch (Exception exception)
+            {
+                LoggerUtil.Error(_api, this, $"Exception on checking value for setting '{code}' for config '{_domain}'.\nException: {exception}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Assigns every setting onto the object it was reflected from, using the schema rather
     /// than matching a code against member names. A flattened config has codes like
     /// "Thirst/HungerRate", which match no member name anywhere.
@@ -624,7 +669,7 @@ public sealed class Config : IConfig, IDisposable
             FromYaml(settings.Values, defaultConfig);
         }
     }
-    private void ParseJson(JsonObject json, out Dictionary<string, ConfigSetting> settings, out SortedDictionary<float, IConfigBlock> configBlocks, out string defaultConfig, string domain, string? skeleton = null)
+    private void ParseJson(JsonObject json, out Dictionary<string, ConfigSetting> settings, out SortedDictionary<float, IConfigBlock> configBlocks, out string defaultConfig, string domain, string? skeleton = null, string? readValuesFrom = null)
     {
         Version = FromJsonDefinition(json, out settings, out configBlocks, domain);
 
@@ -671,7 +716,8 @@ public sealed class Config : IConfig, IDisposable
 
         defaultConfig = defaults.Token.ToString(Newtonsoft.Json.Formatting.Indented);
 
-        string jsonConfig = ReadConfigFile(defaultConfig, false);
+        // An adopted config's values are whatever its object holds now; see the constructor.
+        string jsonConfig = readValuesFrom ?? ReadConfigFile(defaultConfig, false);
 
         JsonObject jsonConfigObject;
 

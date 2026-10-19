@@ -1,3 +1,5 @@
+using System;
+using System.Runtime.Serialization;
 using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
 
@@ -11,6 +13,24 @@ public class Settings
 }
 
 /// <summary>
+/// A config Newtonsoft reads but, once a test sets Tangle, refuses to write - standing in for
+/// a class with a reference loop or a member no converter can handle. Static so that it is
+/// neither a setting nor part of what is written.
+/// </summary>
+public class Fragile
+{
+    public static bool Tangle;
+
+    public int Radius = 8;
+
+    [OnSerializing]
+    private void Refuse(StreamingContext context)
+    {
+        if (Tangle) throw new InvalidOperationException("this object cannot be serialised");
+    }
+}
+
+/// <summary>
 /// What a mod with no settings screen looks like: it reads and writes its config, and that
 /// is all. Nothing here runs by itself - the tests call it, so the fixture changes nothing
 /// about a session it is merely loaded into.
@@ -18,6 +38,8 @@ public class Settings
 public static class Loader
 {
     public static Settings Load(ICoreAPI api, string file) => api.LoadModConfig<Settings>(file);
+
+    public static Fragile LoadFragile(ICoreAPI api, string file) => api.LoadModConfig<Fragile>(file);
 
     public static void Save(ICoreAPI api, Settings settings, string file) => api.StoreModConfig(settings, file);
 

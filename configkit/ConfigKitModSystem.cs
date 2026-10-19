@@ -27,14 +27,14 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     public IConfig? GetConfig(string domain) => GetConfigImpl(domain);
     public ISetting? GetSetting(string domain, string code) => GetConfigImpl(domain)?.GetSetting(code);
     public void RegisterManagedConfig(string domain, object configObject, string? path = null, Action? onSyncedFromServer = null, Action<string>? onSettingChanged = null, Action? onConfigSaved = null)
-        => TryRegisterManagedConfig(domain, configObject, path, onSyncedFromServer, onSettingChanged, onConfigSaved, rewriteExisting: true);
+        => TryRegisterManagedConfig(domain, configObject, path, onSyncedFromServer, onSettingChanged, onConfigSaved, adopted: false);
 
     /// <summary>
     /// <see cref="RegisterManagedConfig"/>, saying whether it took the config. Every refusal
     /// below logs its own reason; this is for a caller that needs to know the outcome too.
     /// </summary>
-    /// <param name="rewriteExisting">See the Config constructor of the same parameter.</param>
-    internal bool TryRegisterManagedConfig(string domain, object configObject, string? path, Action? onSyncedFromServer, Action<string>? onSettingChanged, Action? onConfigSaved, bool rewriteExisting)
+    /// <param name="adopted">See the Config constructor of the same parameter.</param>
+    internal bool TryRegisterManagedConfig(string domain, object configObject, string? path, Action? onSyncedFromServer, Action<string>? onSettingChanged, Action? onConfigSaved, bool adopted)
     {
         if (_api == null) return false;
 
@@ -71,7 +71,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         // when nobody translated it. That last case is what SetConfigDisplayName is for.
         string name = _api.ModLoader.GetMod(domain)?.Info.Name ?? Lang.Get(domain);
 
-        Config config = new(_api, domain, name, configObject, path ?? domain + ".json", rewriteExisting);
+        Config config = new(_api, domain, name, configObject, path ?? domain + ".json", adopted);
 
         // Say what was registered, and say what was not. The old reflection walk dropped
         // every member it could not classify with no row, no key and no log line, so a mod
@@ -105,11 +105,13 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         // time the mod's callback runs, its own settings object already holds the new value.
         config.SettingChanged += setting => onSettingChanged?.Invoke(setting.YamlCode);
 
-        // The constructor has already read the file, and SettingChanged is only subscribed
-        // above - after the fact - so nothing has pushed those values onto the caller's
-        // object yet. Without this a mod runs on its compiled-in defaults while the file and
-        // the settings screen both show what the player edited.
-        config.AssignSettingsValues(configObject);
+        // A config read from its file has to push those values onto the caller's object:
+        // SettingChanged is only subscribed above - after the fact - so nothing has done it
+        // yet, and without this a mod runs on its compiled-in defaults while the file and the
+        // settings screen both show what the player edited. A config read from the object
+        // itself has nothing to push, only values to check.
+        if (config.ValuesFromObject) config.CheckSettingsValues();
+        else config.AssignSettingsValues(configObject);
 
         config.ConfigSaved += config =>
         {
@@ -692,7 +694,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
             }
 
             string domain = AutoConfigs.DomainFor(modId, file);
-            if (!TryRegisterManagedConfig(domain, value, file, null, null, null, rewriteExisting: false)) continue;
+            if (!TryRegisterManagedConfig(domain, value, file, null, null, null, adopted: true)) continue;
 
             _autoDomainsByFile[file] = domain;
             _autoModIds.Add(modId);
