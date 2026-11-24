@@ -17,7 +17,6 @@ using Vintagestory.API.Config;
 using Vintagestory.API.Datastructures;
 using Vintagestory.API.Server;
 using Vintagestory.Client.NoObf;
-using Vintagestory.Common;
 
 namespace ConfigKit;
 
@@ -588,7 +587,7 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
     {
         if (_api == null) return;
 
-        ConfigRegistry? registry = _registry ?? GetRegistry(_api);
+        ConfigRegistry? registry = _registry;
 
         foreach (IAsset asset in _api.Assets.GetMany(AssetCategory.config.Code).Where((asset) => asset.Name == "configlib-patches.json"))
         {
@@ -752,10 +751,6 @@ public sealed class ConfigKitModSystem : ModSystem, IConfigProvider
         }
 
         config.SettingChanged += setting => SettingChanged?.Invoke(domain, config, setting);
-    }
-    private static ConfigRegistry? GetRegistry(ICoreAPI api)
-    {
-        return (api.World as GameMain)?.GetRecipeRegistry(_registryCode) as ConfigRegistry;
     }
 
     private void OnConfigSaved(Config config)

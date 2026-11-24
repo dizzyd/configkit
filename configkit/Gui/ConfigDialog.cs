@@ -327,7 +327,7 @@ public class ConfigDialog : GuiDialog
     {
         if (WidgetFor(yamlCode) is not GuiElementEditableTextBase editable) return false;
 
-        editable.SetValue(text);
+        editable.SetText(text);
         return true;
     }
 
@@ -1763,15 +1763,15 @@ public class ConfigDialog : GuiDialog
                 // The same form ControlHeight measured. Showing the compact token instead
                 // put 115 characters of one-line JSON into a box sized for six indented
                 // ones, which looked like a large empty box with two wrapped lines in it.
-                area.SetValue(JsonText(setting));
+                area.SetText(JsonText(setting));
                 break;
 
             case GuiElementNumberInput number:
-                number.SetValue(NumberText(setting));
+                number.SetText(NumberText(setting));
                 break;
 
             case GuiElementTextInput text:
-                text.SetValue(setting.SettingType == ConfigSettingType.Color
+                text.SetText(setting.SettingType == ConfigSettingType.Color
                     ? setting.Value.AsString("")
                     : setting.Value.AsString(""));
                 break;
@@ -1941,7 +1941,7 @@ public class ConfigDialog : GuiDialog
 
         filter.SetPlaceHolderText("filter");
         composer.AddInteractiveElement(filter, "filter");
-        _afterCompose.Add(() => filter.SetValue(_filter));
+        _afterCompose.Add(() => filter.SetText(_filter));
     }
 
     private string Breadcrumb()
@@ -2272,7 +2272,7 @@ public class ConfigDialog : GuiDialog
 
         container.Add(input);
         _keyWidgets[label] = input;
-        _afterCompose.Add(() => input.SetValue(existing));
+        _afterCompose.Add(() => input.SetText(existing));
     }
 
     /// <summary>

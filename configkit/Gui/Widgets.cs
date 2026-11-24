@@ -47,7 +47,7 @@ internal sealed class NullableNumberInput : GuiElementNumberInput
             _restoring = false;
         }
 
-        if (empty) SetValue("");
+        if (empty) this.SetText("");
     }
 }
 

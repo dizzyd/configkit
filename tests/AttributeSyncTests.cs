@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using ConfigKit;
 using Newtonsoft.Json.Linq;
+using Vintagestory.API.Config;
 using Vintagestory.API.Datastructures;
 using VsTestkit.Testing;
 using static VsTestkit.Testing.Vs;
@@ -53,14 +54,15 @@ public class AttributeSyncTests
 
         ConfigSetting setting = (ConfigSetting)config.GetSetting("PartProps")!;
 
-        // Straight from the game's own conversion this tree contains null entries.
+        // Straight from the game's own conversion this tree contains null entries, until 1.23.
         TreeAttribute raw = new();
         raw["value"] = setting.Value.ToAttribute();
 
         bool threw = false;
         try { raw.ToBytes(); } catch (System.NullReferenceException) { threw = true; }
 
-        Assert.True(threw, "the game's own conversion no longer produces a null entry, so this test proves nothing");
+        if (!GameVersion.IsAtLeastVersion(GameVersion.ShortGameVersion, "1.23.0-pre.1"))
+            Assert.True(threw, "the game's own conversion no longer produces a null entry, so this test proves nothing");
 
         // Through ConfigKit's, it does not.
         TreeAttribute safe = new();
